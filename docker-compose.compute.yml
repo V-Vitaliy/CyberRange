@@ -1,4 +1,34 @@
 version: '3.8'
+
 services:
-  backend:
-    build: ./backend
+  minio:
+    image: minio/minio:latest
+    container_name: cyberrange_minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-admin_minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-supersecret_minio}
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001" # Web UI Console
+    volumes:
+      - minio_data:/data
+
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: cyberrange_chroma
+    restart: unless-stopped
+    environment:
+      - IS_PERSISTENT=TRUE
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+
+
+volumes:
+  minio_data:
+    name: cyberrange_minio_data
+  chroma_data:
+    name: cyberrange_chroma_data
