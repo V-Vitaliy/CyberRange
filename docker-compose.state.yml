@@ -1,6 +1,37 @@
 version: '3.8'
+
 services:
   postgres:
-    image: postgres:15
+    image: postgres:15-alpine
+    container_name: cyberrange_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cyberadmin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cyberpassword123}
+      POSTGRES_DB: ${POSTGRES_DB:-cyberrange}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cyberadmin} -d ${POSTGRES_DB:-cyberrange}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   redis:
-    image: redis:7
+    image: redis:7-alpine
+    container_name: cyberrange_redis
+    restart: unless-stopped
+    # AOF (Append Only File) for Persistence
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  pg_data:
+    name: cyberrange_pg_data
+  redis_data:
+    name: cyberrange_redis_data
