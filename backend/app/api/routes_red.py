@@ -1,11 +1,14 @@
 import json
 import asyncio
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Query, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.queue_manager import LLMQueueManager, get_queue_manager
 # from app.core.llm_engine import llm_instance (We will connect the real LLM later)
+from app.db.database import get_db #will be created later
 
 router = APIRouter()
 
@@ -61,3 +64,35 @@ async def chat_ask(
         sse_generator(chat_req, queue),
         media_type="text/event-stream"
     )
+
+@router.get("/chat/history", tags=["Red Team"])
+async def search_chat_history(
+    # The 'q' parameter is the search query from the user
+    q: str = Query(..., description="Search query for chat history"),
+    session_id: str = Query(..., description="Current game session ID"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    VULNERABLE ENDPOINT: Search chat history.
+    This endpoint intentionally bypasses SQLAlchemy ORM to demonstrate SQL Injection.
+    """
+    # Intentionally vulnerable raw SQL query using direct string formatting
+    raw_sql_query = f"SELECT * FROM chat_history WHERE session_id = '{session_id}' AND user_message LIKE '%{q}%'"
+
+    try:
+        # Switch to a read-only role to prevent destructive attacks (e.g., DROP TABLE)
+        await db.execute(text("SET ROLE db_readonly"))
+
+        # Execute the vulnerable query
+        result = await db.execute(text(raw_sql_query))
+
+        # Reset role back to the default application user
+        await db.execute(text("RESET ROLE"))
+
+        # Fetch all results
+        rows = result.mappings().all()
+        return {"results": rows}
+
+    except Exception as e:
+        # Deliberately expose the raw database error message to aid attackers (students)
+        raise HTTPException(status_code=400, detail=str(e))
