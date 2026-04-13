@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     # Context window size (Standard for Llama-3)
     LLM_N_CTX: int = 8192
 
+    #Chromadb
+    CHROMA_HOST: str = "localhost"
+    CHROMA_PORT: int = 8000
+
     # Pydantic v2 configuration to read from .env file
     model_config = ConfigDict(env_file=".env", extra="ignore")
 

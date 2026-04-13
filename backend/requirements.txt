@@ -6,3 +6,4 @@ redis
 llama-cpp-python
 python-jose[cryptography]
 pydantic_settings
+chromadb
