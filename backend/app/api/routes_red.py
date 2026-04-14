@@ -1,11 +1,14 @@
+import os
+import aiofiles
 import json
 import asyncio
 from fastapi import APIRouter, Depends, Request, Query, HTTPException, Header
 from fastapi.responses import StreamingResponse
+from fastapi import UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-import jwt # Make sure you have PyJWT installed
+import jwt
 
 from app.core.queue_manager import LLMQueueManager, get_queue_manager
 from app.db.database import get_db
@@ -131,4 +134,44 @@ async def search_chat_history(
 
     except Exception as e:
         # Deliberately expose the raw database error message to aid attackers (students)
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/upload", tags=["Red Team"])
+async def upload_document(
+    file: UploadFile = File(...),
+    # In a real app, we would inject the ETLWorker here,
+    # but for now we focus on the vulnerability
+):
+    """
+    VULNERABLE ENDPOINT: File upload with Path Traversal.
+    Allows attackers to upload files to arbitrary directories using '../' in the filename.
+    """
+
+    # The base directory where files SHOULD be saved
+    base_upload_dir = "uploads/"
+    os.makedirs(base_upload_dir, exist_ok=True)
+
+    # 1. VULNERABLE PATH: Directly trusting user input
+    vulnerable_path = os.path.join(base_upload_dir, file.filename)
+
+    # 2. SECURE PATH: Stripping all directory traversal characters
+    secure_filename = os.path.basename(file.filename)
+    secure_path = os.path.join(base_upload_dir, secure_filename)
+
+    # 3. BLUE TEAM DYNAMIC TOGGLE
+    # In Sprint 3, we will pull this flag from the PostgreSQL GameSession table.
+    # If the Blue Team bought the "Input Sanitization" defense, this becomes True.
+    is_defense_active = False # Default state is vulnerable!
+
+    final_path = secure_path if is_defense_active else vulnerable_path
+
+    try:
+        # Save the file asynchronously
+        async with aiofiles.open(final_path, 'wb') as out_file:
+            content = await file.read()
+            await out_file.write(content)
+
+        return {"filename": file.filename, "message": "File uploaded successfully."}
+    except Exception as e:
+        # Expose the error so students can see if their path traversal worked or hit a permissions error
         raise HTTPException(status_code=400, detail=str(e))

@@ -10,3 +10,4 @@ chromadb
 jwt
 pypdf
 nltk
+aiofiles
