@@ -11,10 +11,6 @@ from app.db.chroma_client import VectorStore
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# NOTE: The NLTK 'punkt' model download was removed from runtime.
-# It MUST be added to the Dockerfile:
-# RUN python -m nltk.downloader punkt
-
 class ETLWorker:
     """
     Production-ready background service that processes files from MinIO (S3),
