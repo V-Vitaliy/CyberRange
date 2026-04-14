@@ -8,3 +8,5 @@ python-jose[cryptography]
 pydantic_settings
 chromadb
 jwt
+pypdf
+nltk
