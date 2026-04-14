@@ -2,9 +2,9 @@ import os
 import aiofiles
 import json
 import asyncio
-from fastapi import APIRouter, Depends, Request, Query, HTTPException, Header
+from fastapi import APIRouter, Depends, Request, Query, HTTPException, Header, UploadFile, File
+from fastapi import WebSocket, WebSocketDisconnect # Added WebSocket imports
 from fastapi.responses import StreamingResponse
-from fastapi import UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -175,3 +175,36 @@ async def upload_document(
     except Exception as e:
         # Expose the error so students can see if their path traversal worked or hit a permissions error
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ---------------------------------------------------------
+# ETL PROGRESS WEBSOCKET
+# ---------------------------------------------------------
+@router.websocket("/ws/etl-status/{session_id}")
+async def etl_status_websocket(websocket: WebSocket, session_id: str):
+    """
+    WebSocket endpoint for streaming ETL (Extract, Transform, Load) progress to the frontend.
+    """
+    # Accept the WebSocket connection.
+    await websocket.accept()
+
+    try:
+        # Mocking the ETL process pipeline stages
+        # In a real app, this would read from a Redis Pub/Sub channel or an asyncio queue
+        # where the ETLWorker publishes its actual progress.
+        stages = [
+            {"status": "Processing", "progress": 10, "message": "Extracting text from PDF..."},
+            {"status": "Processing", "progress": 50, "message": "Chunking text with NLTK..."},
+            {"status": "Processing", "progress": 90, "message": "Generating embeddings (CPU)..."},
+            {"status": "Complete", "progress": 100, "message": "Vectors loaded into ChromaDB!"}
+        ]
+
+        for stage in stages:
+            await asyncio.sleep(1.5) # Simulating heavy CPU work
+
+            # Send the 'stage' dictionary to the client as JSON.
+            await websocket.send_json(stage)
+
+    except WebSocketDisconnect:
+        # Handle the case where the client closes the browser or navigates away
+        print(f"Client {session_id} disconnected from ETL status stream.")
