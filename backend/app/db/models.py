@@ -3,9 +3,8 @@ from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 import uuid
+from app.db.database import Base
 
-# Base class for all our models
-Base = declarative_base()
 
 class User(Base):
     __tablename__ = "users"

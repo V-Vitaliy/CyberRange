@@ -36,8 +36,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ВАЖНО: Роутеры нужно подключать ПОСЛЕ инициализации app
 app.include_router(red_router, prefix="/api")
+app.include_router(blue_router, prefix="/api")
 
 @app.get("/api/health", tags=["System"])
 async def health_check():

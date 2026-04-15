@@ -11,3 +11,8 @@ jwt
 pypdf
 nltk
 aiofiles
+alembic
+passlib[bcrypt]
+sentence_transformers
+asyncpg
+python-multipart
