@@ -4,6 +4,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.queue_manager import LLMQueueManager
 from app.api.routes_red import router as red_router
+from app.api.routes_blue import router as blue_router
+from app.db.chroma_client import VectorStore
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -12,6 +15,7 @@ async def lifespan(app: FastAPI):
     Initializes the queue manager inside the running event loop.
     """
     app.state.queue_manager = LLMQueueManager()
+    app.state.vector_store = VectorStore()
 
     # Here we will later initialize the LLM model:
     # app.state.llm = init_llm()
