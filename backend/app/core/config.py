@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     CHROMA_HOST: str = "localhost"
     CHROMA_PORT: int = 8000
 
+    #Postgres
+    DATABASE_URL: str = "postgresql+asyncpg://cyberadmin:cyberpassword123@127.0.0.1:5432/cyberrange"
+
+    JWT_SECRET: str = "super-secret-blue-team-key"
+    JWT_ALGORITHM: str = "HS256"
     # Pydantic v2 configuration to read from .env file
     model_config = ConfigDict(env_file=".env", extra="ignore")
 

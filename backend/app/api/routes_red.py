@@ -66,7 +66,8 @@ async def sse_generator(request: ChatRequest, queue: LLMQueueManager, vector_sto
         final_prompt = f"{context}\n\nUser: {request.prompt}\nAI:"
 
         # --- MOCK LLM GENERATION (Will be replaced with real Llama-3 later) ---
-        yield f"event: message\ndata: {json.dumps({'token': f'[User role: {user.get('role', 'unknown')}] '})}\n\n"
+        mock_response = f"[User role: {user.get('role', 'unknown')}] "
+        yield f"event: message\ndata: {json.dumps({'token': mock_response })}\n\n"
 
         tokens = ["Processing ", "with ", "context: ", f"{context[:20]}..."]
         for token in tokens:
