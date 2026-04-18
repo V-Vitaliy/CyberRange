@@ -40,7 +40,9 @@ class Settings(BaseSettings):
 
     JWT_SECRET: str = "super-secret-blue-team-key"
     JWT_ALGORITHM: str = "HS256"
-    # Pydantic v2 configuration to read from .env file
+
+    REDIS_URL: str = "redis://localhost:6379"
+
     model_config = ConfigDict(env_file=".env", extra="ignore")
 
 # Global settings instance to be imported across the app

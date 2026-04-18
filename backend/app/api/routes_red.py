@@ -12,43 +12,44 @@ from app.db.chroma_client import VectorStore, get_vector_store
 from app.core.security import get_current_user_vulnerable
 from app.services.rag_service import generate_chat_response_sse
 from app.schemas.red_team import ChatRequest
+from app.core.redis_client import get_redis
+from app.services.rate_limiter import enforce_rate_limit
 
 router = APIRouter()
 
-# ---------------------------------------------------------
-# CHAT ENDPOINT WITH RAG
-# ---------------------------------------------------------
 @router.post("/chat/ask", tags=["Red Team"])
 async def chat_ask(
+    request: Request,
     chat_req: ChatRequest,
     queue: LLMQueueManager = Depends(get_queue_manager),
     vector_store: VectorStore = Depends(get_vector_store),
-    user: dict = Depends(get_current_user_vulnerable) # Injecting our vulnerable auth
+    user: dict = Depends(get_current_user_vulnerable),
+    db: AsyncSession = Depends(get_db),
+    redis=Depends(get_redis)
 ):
     """
     Main chat endpoint for the Red Team.
     Retrieves context from ChromaDB (RAG) and streams the LLM response.
-    Vulnerable to JWT bypass (alg: none).
+    Vulnerable to JWT bypass (alg: none). Includes dynamic rate limiting.
     """
-    # Logic delegated to RAG service
+    await enforce_rate_limit(
+        db=db,
+        redis=redis,
+        session_id=chat_req.session_id,
+        client_ip=request.client.host
+    )
+
     return StreamingResponse(
         generate_chat_response_sse(chat_req.prompt, queue, vector_store, user),
         media_type="text/event-stream"
     )
 
-# ---------------------------------------------------------
-# CHAT HISTORY ENDPOINT WITH SQL Injection
-# ---------------------------------------------------------
 @router.get("/chat/history", tags=["Red Team"])
 async def search_chat_history(
     q: str = Query(..., description="Search query for chat history"),
     session_id: str = Query(..., description="Current game session ID"),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    VULNERABLE ENDPOINT: Search chat history.
-    This endpoint intentionally bypasses SQLAlchemy ORM to demonstrate SQL Injection.
-    """
     raw_sql_query = f"SELECT * FROM chat_history WHERE session_id = '{session_id}' AND user_message LIKE '%{q}%'"
 
     try:
@@ -61,15 +62,8 @@ async def search_chat_history(
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-# ---------------------------------------------------------
-# FILE UPLOAD WITH PATH TRAVERSAL
-# ---------------------------------------------------------
 @router.post("/upload", tags=["Red Team"])
 async def upload_document(file: UploadFile = File(...)):
-    """
-    VULNERABLE ENDPOINT: File upload with Path Traversal.
-    Allows attackers to upload files to arbitrary directories using '../' in the filename.
-    """
     base_upload_dir = "uploads/"
     os.makedirs(base_upload_dir, exist_ok=True)
 
@@ -83,14 +77,8 @@ async def upload_document(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-# ---------------------------------------------------------
-# ETL PROGRESS WEBSOCKET
-# ---------------------------------------------------------
 @router.websocket("/ws/etl-status/{session_id}")
 async def etl_status_websocket(websocket: WebSocket, session_id: str):
-    """
-    WebSocket endpoint for streaming ETL progress to the frontend.
-    """
     await websocket.accept()
     try:
         stages = [
