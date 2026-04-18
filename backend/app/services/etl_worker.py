@@ -3,38 +3,40 @@ import uuid
 import logging
 from typing import List
 from pypdf import PdfReader
+import nltk
 from nltk.tokenize import sent_tokenize
+import tiktoken
 
 from app.db.chroma_client import VectorStore
 
-# Configure production-grade logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+try:
+    nltk.data.find('tokenizers/punkt_tab')
+except LookupError:
+    logger.info("Downloading NLTK 'punkt_tab' dataset...")
+    nltk.download('punkt_tab', quiet=True)
+
 class ETLWorker:
-    """
-    Production-ready background service that processes files from MinIO (S3),
-    extracts text, applies semantic chunking with overlap, and batches embeddings to ChromaDB.
-    """
     def __init__(self, vector_store: VectorStore):
         self.vector_store = vector_store
 
-        # Configuration for Chunking (in approximate tokens)
-        self.max_tokens = 250       # ~1000 characters
-        self.overlap_tokens = 50    # ~200 characters overlap
-        self.batch_size = 100       # Number of vectors to insert at once
+        self.max_tokens = 250
+        self.overlap_tokens = 50
+        self.batch_size = 100
+
+        # Initialize a fast BPE tokenizer to accurately count tokens for any language
+        self.tokenizer = tiktoken.get_encoding("cl100k_base")
 
     def _estimate_tokens(self, text: str) -> int:
         """
-        Fast heuristic to estimate token count without heavy libraries like tiktoken.
-        Roughly 4 characters = 1 token in English.
+        Uses exact BPE token counting instead of naive heuristics.
+        Handles Polish, English, and special characters accurately.
         """
-        return len(text) // 4
+        return len(self.tokenizer.encode(text))
 
     def _chunk_text_with_overlap(self, text: str) -> List[str]:
-        """
-        Splits text into chunks by sentence boundaries, maintaining a context overlap.
-        """
         sentences = sent_tokenize(text)
         chunks = []
         current_chunk = []
@@ -43,13 +45,9 @@ class ETLWorker:
         for sentence in sentences:
             sentence_tokens = self._estimate_tokens(sentence)
 
-            # If a single sentence is larger than max_tokens, we still add it
-            # (or we could forcefully split it, but keeping it intact is usually safer for semantics)
             if current_tokens + sentence_tokens > self.max_tokens and current_chunk:
                 chunks.append(" ".join(current_chunk))
 
-                # Create overlap: keep popping from the start of the chunk
-                # until the remaining sentences fit within the overlap limit
                 while current_tokens > self.overlap_tokens and len(current_chunk) > 1:
                     removed_sentence = current_chunk.pop(0)
                     current_tokens -= self._estimate_tokens(removed_sentence)
@@ -63,14 +61,9 @@ class ETLWorker:
         return chunks
 
     def process_pdf(self, file_content: bytes, filename: str) -> int:
-        """
-        Reads a PDF file, splits it into semantic chunks with overlap,
-        and saves it to the vector database in batches.
-        """
         logger.info(f"Starting ETL pipeline for file: {filename}")
 
         try:
-            # 1. Extraction (O(N) string building)
             reader = PdfReader(io.BytesIO(file_content))
             extracted_pages = []
 
@@ -87,11 +80,9 @@ class ETLWorker:
                 logger.error(f"No text extracted from {filename}. File might be a scanned image.")
                 return 0
 
-            # 2. Chunking with overlap
             chunks = self._chunk_text_with_overlap(full_text)
             logger.info(f"Generated {len(chunks)} chunks from {filename}.")
 
-            # 3. Prepare rich metadata and secure IDs
             metadatas = []
             ids = []
             for i, chunk in enumerate(chunks):
@@ -100,10 +91,8 @@ class ETLWorker:
                     "chunk_id": i,
                     "token_length": self._estimate_tokens(chunk)
                 })
-                # Using UUID4 prevents ID collisions if the same filename is uploaded twice
                 ids.append(f"{filename}_{i}_{uuid.uuid4().hex[:8]}")
 
-            # 4. Load (Batch insertion to Vector DB)
             if chunks:
                 total_inserted = 0
                 for i in range(0, len(chunks), self.batch_size):

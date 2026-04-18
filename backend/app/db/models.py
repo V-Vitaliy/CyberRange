@@ -37,8 +37,8 @@ class GameSession(Base):
     system_prompt = Column(Text, default="You are a helpful university assistant.")
     use_reranker = Column(Boolean, default=False)
     rate_limit_enabled = Column(Boolean, default=False)
-
     rate_limit_rpm = Column(Integer, default=60)
+    jwt_filter_enabled = Column(Boolean, default=False)
 
 
 class ChatHistory(Base):

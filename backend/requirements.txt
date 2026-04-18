@@ -16,3 +16,4 @@ passlib[bcrypt]
 sentence_transformers
 asyncpg
 python-multipart
+tiktoken

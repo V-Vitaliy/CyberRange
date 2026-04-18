@@ -12,6 +12,8 @@ from app.db.chroma_client import VectorStore, get_vector_store
 from app.core.security import get_current_user_vulnerable
 from app.services.rag_service import generate_chat_response_sse
 from app.schemas.red_team import ChatRequest
+from app.services.etl_worker import ETLWorker
+
 
 router = APIRouter()
 
@@ -23,16 +25,23 @@ async def chat_ask(
     chat_req: ChatRequest,
     queue: LLMQueueManager = Depends(get_queue_manager),
     vector_store: VectorStore = Depends(get_vector_store),
-    user: dict = Depends(get_current_user_vulnerable) # Injecting our vulnerable auth
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user_vulnerable) # Injecting  vulnerable auth
 ):
     """
     Main chat endpoint for the Red Team.
     Retrieves context from ChromaDB (RAG) and streams the LLM response.
     Vulnerable to JWT bypass (alg: none).
     """
-    # Logic delegated to RAG service
     return StreamingResponse(
-        generate_chat_response_sse(chat_req.prompt, queue, vector_store, user),
+        generate_chat_response_sse(
+            db=db,
+            session_id=chat_req.session_id,
+            prompt=chat_req.prompt,
+            queue=queue,
+            vector_store=vector_store,
+            user=user
+        ),
         media_type="text/event-stream"
     )
 
@@ -65,23 +74,32 @@ async def search_chat_history(
 # FILE UPLOAD WITH PATH TRAVERSAL
 # ---------------------------------------------------------
 @router.post("/upload", tags=["Red Team"])
-async def upload_document(file: UploadFile = File(...)):
-    """
-    VULNERABLE ENDPOINT: File upload with Path Traversal.
-    Allows attackers to upload files to arbitrary directories using '../' in the filename.
-    """
+async def upload_document(
+    file: UploadFile = File(...),
+    vector_store: VectorStore = Depends(get_vector_store)
+):
     base_upload_dir = "uploads/"
     os.makedirs(base_upload_dir, exist_ok=True)
 
     vulnerable_path = os.path.join(base_upload_dir, file.filename)
 
     try:
+        content = await file.read()
+
         async with aiofiles.open(vulnerable_path, 'wb') as out_file:
-            content = await file.read()
             await out_file.write(content)
-        return {"filename": file.filename, "message": "File uploaded successfully."}
+
+        etl = ETLWorker(vector_store)
+        chunks_inserted = await asyncio.to_thread(etl.process_pdf, content, file.filename)
+
+        return {
+            "filename": file.filename,
+            "message": "File uploaded and processed successfully.",
+            "chunks_vectorized": chunks_inserted
+        }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
 
 # ---------------------------------------------------------
 # ETL PROGRESS WEBSOCKET
