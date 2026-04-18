@@ -5,10 +5,10 @@ from sqlalchemy.future import select
 
 from app.db.database import get_db
 from app.db.models import User
-from app.schemas.blue_team import LoginRequest, TokenResponse, InvestigateRequest, InvestigateResponse
+from app.schemas.blue_team import LoginRequest, TokenResponse, InvestigateRequest, InvestigateResponse,  BuyDefenseRequest, BuyDefenseResponse
 from app.core.security import verify_password, create_access_token, get_current_user_secure
 from app.services.forensics import process_investigation
-
+from app.services.defense import process_defense_purchase
 router = APIRouter()
 
 @router.post("/login", response_model=TokenResponse, tags=["Blue Team"])
@@ -57,4 +57,20 @@ async def investigate_log(
         is_malicious_claim=request_data.is_malicious,
         session_id=request_data.session_id,
         user_id=current_user.id
+    )
+
+
+@router.post("/defense/buy", response_model=BuyDefenseResponse, tags=["Blue Team"])
+async def buy_defense(
+    request_data: BuyDefenseRequest,
+    current_user: User = Depends(get_current_user_secure), # Protected!
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Allows Blue Team to spend their defense budget on security patches.
+    """
+    return await process_defense_purchase(
+        db=db,
+        session_id=request_data.session_id,
+        defense_type=request_data.defense_type
     )
