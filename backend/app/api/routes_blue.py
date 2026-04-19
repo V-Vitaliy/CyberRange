@@ -33,8 +33,13 @@ async def login_blue_team(login_data: LoginRequest, db: AsyncSession = Depends(g
     if user.role not in ["blue_team", "admin"]:
         raise HTTPException(status_code=403, detail="Not authorized to access Blue Team panel")
 
+    token_data = {
+        "sub": user.username,
+        "role": user.role,
+        "lab_instance_id": str(user.lab_instance_id)
+    }
     access_token = create_access_token(
-        data={"sub": user.username, "role": user.role},
+        data=token_data,
         expires_delta=timedelta(minutes=60)
     )
 

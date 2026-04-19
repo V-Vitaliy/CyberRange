@@ -6,3 +6,7 @@ class ChatRequest(BaseModel):
     """
     prompt: str
     session_id: str
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
