@@ -1,1 +1,0 @@
-export default function Dashboard() { return <div>Blue Team Dash</div> }
