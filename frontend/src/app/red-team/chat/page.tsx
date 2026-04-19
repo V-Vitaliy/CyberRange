@@ -1,1 +1,0 @@
-export default function Chat() { return <div>Red Team Chat</div> }
