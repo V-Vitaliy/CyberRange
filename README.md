@@ -1,43 +1,85 @@
-# AI Security & Alignment CyberRange
+AI Security & Alignment CyberRange
+==================================
 
-**Overview**
+Overview
+--------
 
-AI Security CyberRange is a vulnerable-by-design, isolated laboratory environment engineered for modern AI threat modeling and defense.
+**AI Security CyberRange** is an isolated, Vulnerable-by-Design laboratory platform created for threat modeling and training in the defense of modern AI applications (LLMs).
 
-Unlike traditional "black-box" testing via external APIs, this platform provides a fully controlled On-Premise (or isolated Hybrid Cloud) infrastructure where students and cybersecurity professionals can analyze, attack, and mitigate the latest threats defined in standards like the OWASP Top 10 for LLM Applications.
+Unlike traditional "black-box" testing via external APIs, this platform provides a fully controlled On-Premise or Hybrid Cloud infrastructure. Students and cybersecurity professionals can explore, attack, and defend systems against threats outlined in standards like the **OWASP Top 10 for LLM Applications**.
 
-*Game Modes (Red vs. Blue)*
+Game Modes (Red vs. Blue)
+-------------------------
 
-The platform supports a highly engaging, competitive learning environment:
+The platform supports an interactive, competitive process:
 
-🟥 Red Team (Offense): Exploits realistic UX/UI elements. Vectors include Indirect Prompt Injection, RAG Data Poisoning (via Path Traversal / S3 manipulation), SQL Injection in chat history, and Context Window Overflow.
+### Red Team (Offense)
 
-🟦 Blue Team (Defense / SOC): Operates on a Forensics-Driven Defense model. Analyzes deep digital traces (JSONB SIEM logs, Cosine Similarity anomalies) to identify attacks. Uses a "Defense Economy" to purchase and deploy live mitigations (e.g., Cross-Encoder Rerankers, Redis Rate Limiting, strict JWT validation) without halting the service.
+Players attack the platform's vulnerable endpoints using modern attack vectors:
 
- **Architecture (Hybrid Cloud / On-Premise)**
+*   **Indirect Prompt Injection:** Manipulation of the LLM context.
+    
+*   **RAG Data Poisoning:** Uploading malicious PDF documents into the vector database via a **Path Traversal** vulnerability.
+    
+*   **SQL Injection (SQLi):** Exploiting vulnerabilities in chat history (bypassing the ORM).
+    
+*   **JWT Signature Bypass:** Authentication bypass using the alg: none technique.
+    
+*   **Sponge Bombs & DoS:** Exhaustion of GPU computational resources (intercepted by an architectural queue and a Redis Rate Limiter).
+    
 
-To ensure extreme realism (including Denial of Service tests on the LLM) without breaching public cloud TOS or incurring massive costs, the system uses a highly optimized architecture:
+### Blue Team (Defense / SOC)
 
-In-Process LLM: Meta Llama-3 (8B) loaded directly into the VRAM of the main backend process using llama-cpp-python with Q4_K_M quantization and Flash Attention.
+The defense team uses a **Forensics-Driven Defense** model.
 
-Hardware Isolation: Background ETL processes (PDF Chunking & Vectorization via mpnet) run strictly on the CPU, ensuring that malicious file uploads do not crash the GPU-bound chat inference.
+*   **Log Analysis:** Defenders investigate incidents by analyzing JSONB logs from the SIEM system.
+    
+*   **Defense Economy:** For successful investigations, the team earns "defense points" (Defense Budget).
+    
+*   **Dynamic Patching:** Points can be spent to activate defenses **in real-time** (without server reboots):
+    
+    *   Activating a **Cross-Encoder Reranker** (Filtering poisoned RAG context).
+        
+    *   Overriding the **System Prompt** with a stricter one.
+        
+    *   Enabling **Redis Rate Limiting** (DoS attack mitigation).
+        
+    *   Enabling strict **JWT** cryptographic validation.
+        
 
-*State & Compute Split:* 
+Architecture (Hybrid Cloud / On-Premise)
+----------------------------------------
 
-State Server: PostgreSQL (SIEM logs, users), Redis (Rate Limiting).
+To ensure maximum realism and optimize costs (FinOps), the architecture is divided into two compute nodes:
 
-Compute Server: FastAPI, ChromaDB (Vectors), MinIO (S3 Sandbox).
+*   **State Server (CPU):** A lightweight node for state storage.
+    
+    *   _PostgreSQL:_ Stores users, SIEM logs, CTF flags, and economy balance.
+        
+    *   _Redis:_ Session caching and Token Bucket for Rate Limiting.
+        
+*   **AI Compute Server (GPU-Accelerated):** Heavy computation node.
+    
+    *   _FastAPI:_ The core of the platform (asynchronous API).
+        
+    *   _In-Process LLM:_ Meta Llama-3 (8B) running directly in the backend process VRAM via llama-cpp-python (with Q4\_K\_M quantization and Flash Attention).
+        
+    *   _ChromaDB & MinIO:_ Vector storage and an S3-compatible sandbox.
+        
+    *   _ETL Worker:_ Background tasks based on nltk and tiktoken for PDF chunking.
+        
 
-**Development Roadmap (Backlog)**
+Development Roadmap (Sprints)
+-----------------------------
 
-The project is currently in active development, broken down into 5 main Sprints:
+The project is divided into 5 main sprints. Current status:
 
-[x] Sprint 1: Core Infrastructure & In-Process LLM (Docker, FastAPI, Llama-3 init).
-
-[ ] Sprint 2: Vulnerable API & Red Team Vectors (SQLi, RAG Poisoning, JWT Bypass).
-
-[ ] Sprint 3: Defense API & Blue Team Economy (SIEM, Reranker, Rate Limiting).
-
-[ ] Sprint 4: Frontend UI / UX (Next.js Chat, Blue Team Dashboard).
-
-[ ] Sprint 5: Forensics, CLI Admin & Golden Data (Auto-grading, Teardown scripts).
+*   \[x\] **Sprint 1: Core Infrastructure & In-Process LLM** (Docker, FastAPI, Llama-3 init, Async Queues).
+    
+*   \[x\] **Sprint 2: Vulnerable API & Red Team Vectors** (SQLi, Path Traversal, ChromaDB, RAG Poisoning, JWT Bypass).
+    
+*   \[x\] **Sprint 3: Defense API & Blue Team Economy** (Dynamic Patching, Reranker, Redis Rate Limiting, API Customization).
+    
+*   \[ \] **Sprint 4: Frontend UI / UX** (Next.js Chat, Blue Team Dashboard, WebSocket ETL Status).
+    
+*   \[ \] **Sprint 5: Forensics, CLI Admin & Golden Data** (Auto-grading, SIEM Engine Logging, Teardown scripts).
