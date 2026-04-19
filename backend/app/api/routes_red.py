@@ -1,17 +1,22 @@
 import os
 import aiofiles
-from fastapi import APIRouter, Depends, Request, Query, HTTPException, UploadFile, File, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
 import asyncio
+from fastapi import APIRouter, Depends, Request, Query, HTTPException, UploadFile, File, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import StreamingResponse
+from sqlalchemy import text, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.queue_manager import LLMQueueManager, get_queue_manager
 from app.db.database import get_db
 from app.db.chroma_client import VectorStore, get_vector_store
-from app.core.security import get_current_user_vulnerable
+from app.core.security import (
+    get_current_user_vulnerable,
+    verify_password,
+    create_access_token
+)
+from app.db.models import User
 from app.services.rag_service import generate_chat_response_sse
-from app.schemas.red_team import ChatRequest
+from app.schemas.red_team import ChatRequest, LoginRequest
 from app.services.etl_worker import ETLWorker
 
 from app.core.redis_client import get_redis
@@ -19,7 +24,48 @@ from app.services.rate_limiter import enforce_rate_limit
 
 router = APIRouter()
 
-@router.post("/chat/ask", tags=["Red Team"])
+@router.post("/login", tags=["Red Team - User"])
+async def red_team_login(
+    login_data: LoginRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Authenticates Red Team members and provides an initial valid JWT.
+    This token contains the lab_instance_id for tracking across the system.
+    """
+    result = await db.execute(select(User).where(User.username == login_data.username))
+    user = result.scalars().first()
+
+    if not user or not verify_password(login_data.password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials"
+        )
+
+    if user.role != "red_team":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access restricted to Red Team members"
+        )
+
+    # lab_instance_id is the key for SIEM attribution
+    token_data = {
+        "sub": user.username,
+        "role": user.role,
+        "lab_instance_id": str(user.lab_instance_id)
+    }
+
+    token = create_access_token(data=token_data)
+
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "role": user.role
+    }
+
+
+
+@router.post("/chat/ask", tags=["Red Team - Chat"])
 async def chat_ask(
     request: Request,
     chat_req: ChatRequest,
@@ -53,7 +99,7 @@ async def chat_ask(
         media_type="text/event-stream"
     )
 
-@router.get("/chat/history", tags=["Red Team"])
+@router.get("/chat/history", tags=["Red Team - Chat"])
 async def search_chat_history(
     q: str = Query(..., description="Search query for chat history"),
     session_id: str = Query(..., description="Current game session ID"),
@@ -71,7 +117,7 @@ async def search_chat_history(
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.post("/upload", tags=["Red Team"])
+@router.post("/upload", tags=["Red Team - Upload"])
 async def upload_document(
     file: UploadFile = File(...),
     vector_store: VectorStore = Depends(get_vector_store)
