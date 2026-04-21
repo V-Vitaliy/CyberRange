@@ -1,1 +1,10 @@
-export default function Chat() { return <div>Red Team Chat</div> }
+"use client";
+import ChatWindow from "../../../components/ChatWindow";
+
+export default function RedTeamChatPage() {
+  return (
+    <main className="min-h-screen bg-black">
+      <ChatWindow />
+    </main>
+  );
+}
