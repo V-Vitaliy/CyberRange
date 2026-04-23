@@ -5,6 +5,8 @@ from redis.asyncio import Redis
 from uuid import UUID
 
 from app.db.models import GameSession
+from app.services.siem_logger import log_security_event
+
 
 async def enforce_rate_limit(
     db: AsyncSession,
@@ -30,6 +32,20 @@ async def enforce_rate_limit(
 
     if current_requests > session.rate_limit_rpm:
         print(f"DEBUG: IP {client_ip} BLOCKED!")
+
+        # Log the DoS attempt into SIEM
+        await log_security_event(
+            db=db,
+            lab_instance_id=str(session.lab_instance_id),
+            event_type="DOS_ATTEMPT_BLOCKED",
+            payload={
+                "current_requests": current_requests,
+                "limit": session.rate_limit_rpm,
+                "description": "Rate limit exceeded. Potential DoS or Sponge Bomb attack."
+            },
+            source_ip=client_ip
+        )
+
         raise HTTPException(
             status_code=429,
             detail="Too Many Requests. The Blue Team's Active WAF has temporarily blocked your IP."
