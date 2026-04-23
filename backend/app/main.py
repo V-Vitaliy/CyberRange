@@ -7,12 +7,37 @@ from app.db.chroma_client import VectorStore
 from app.api.routes_red import router as red_router
 from app.api.routes_blue import router as blue_router
 
+# 2. Sub-application for Red Team Docs
+red_app = FastAPI(
+    title="Red Team API",
+    description="Vulnerable endpoints for exploitation and data poisoning.",
+    version="1.0.0",
+)
+red_app.include_router(red_router, prefix="")
+
+# 3. Sub-application for Blue Team Docs
+blue_app = FastAPI(
+    title="Blue Team API",
+    description="Defense shop and system configuration endpoints.",
+    version="1.0.0",
+)
+blue_app.include_router(blue_router, prefix="")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.queue_manager = LLMQueueManager()
-    app.state.vector_store = VectorStore()
+    queue_manager = LLMQueueManager()
+    vector_store = VectorStore()
+
+    app.state.queue_manager = queue_manager
+    app.state.vector_store = vector_store
+
+    red_app.state.queue_manager = queue_manager
+    red_app.state.vector_store = vector_store
+
+    blue_app.state.queue_manager = queue_manager
+    blue_app.state.vector_store = vector_store
+
     yield
-    # Cleanup on shutdown
 
 app = FastAPI(
     title="AI Security CyberRange API",
@@ -30,20 +55,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-red_app = FastAPI(
-    title="Red Team API",
-    description="Vulnerable endpoints for exploitation and data poisoning.",
-    version="1.0.0",
-)
-red_app.include_router(red_router, prefix="")
-
-blue_app = FastAPI(
-    title="Blue Team API",
-    description="Defense shop and system configuration endpoints.",
-    version="1.0.0",
-)
-blue_app.include_router(blue_router, prefix="")
 
 app.mount("/api/red", red_app)
 app.mount("/api/blue", blue_app)
