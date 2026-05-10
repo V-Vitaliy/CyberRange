@@ -41,21 +41,23 @@ class GameSession(Base):
     jwt_filter_enabled = Column(Boolean, default=False)
 
 
-class ChatHistory(Base):
+class ChatThread(Base):
     """
-    Chat logs.
-    NOTE: Although we define it safely here via ORM, the search endpoint
-    (Sprint 2) will deliberately use raw SQL string concatenation on this
-    table to create an SQL Injection vulnerability.
+    Stores individual chat sessions for the Red Team UI.
+    Separates chat history from immutable security audit logs.
     """
-    __tablename__ = "chat_history"
+    __tablename__ = "chat_threads"
 
-    # Here we use sequential Integer because chat messages don't need anti-enumeration protection
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    session_id = Column(UUID(as_uuid=True), nullable=False)
-    user_message = Column(Text, nullable=False)
-    bot_response = Column(Text, nullable=False)
-    lab_instance_id = Column(UUID(as_uuid=True), nullable=False)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("game_sessions.id"), nullable=False)
+    title = Column(String, default="New Chat")
+
+    # Stores chat history as [{"role": "user", "content": "..."}, {"role": "ai", "content": "..."}]
+    messages = Column(JSONB, default=list)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class SecurityAuditLog(Base):

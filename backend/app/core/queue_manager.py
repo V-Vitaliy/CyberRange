@@ -1,5 +1,6 @@
 import asyncio
 from fastapi import HTTPException, status, Request
+from typing import AsyncGenerator, Callable
 
 class LLMQueueManager:
     """
@@ -38,33 +39,13 @@ class LLMQueueManager:
         self.queue.get_nowait()
         self.queue.task_done()
 
-    async def enqueue_request(self, full_prompt: str):
-        """
-        MOCK LLM GENERATOR for local testing without heavy GPU models.
-        Streams back the constructed prompt to verify RAG and dynamic patching.
-        """
+    async def stream_with_lock(self,generetor_func: Callable[[], AsyncGenerator[str, None]])->AsyncGenerator[str, None]:
         await self.wait_for_turn()
         try:
-            # Simulate thinking time
-            await asyncio.sleep(0.5)
-
-            mock_response = (
-                "🤖 [MOCK LLM MODE]\n\n"
-                "Here is the exact prompt I received from the RAG Service:\n"
-                "==================================================\n"
-                f"{full_prompt}\n"
-                "==================================================\n"
-                "If you see your context and system prompt here, RAG works perfectly!"
-            )
-
-            # Stream the response word by word to simulate SSE
-            for word in mock_response.split(" "):
-                yield word + " "
-                await asyncio.sleep(0.05)
-
+            async for chunk in generetor_func():
+                yield chunk
         finally:
             self.release_turn()
-
 
 def get_queue_manager(request: Request) -> LLMQueueManager:
     return request.app.state.queue_manager

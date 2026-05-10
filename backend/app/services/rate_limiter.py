@@ -1,11 +1,9 @@
-from fastapi import HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from redis.asyncio import Redis
 from uuid import UUID
-
-from app.db.models import GameSession
+from app.db.repository import GameSessionRepository
 from app.services.siem_logger import log_security_event
+from fastapi import HTTPException
+from redis.asyncio import Redis
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def enforce_rate_limit(
@@ -14,8 +12,7 @@ async def enforce_rate_limit(
     session_id: UUID,
     client_ip: str
 ) -> None:
-    result = await db.execute(select(GameSession).where(GameSession.id == session_id))
-    session = result.scalars().first()
+    session = await GameSessionRepository.get_by_id(db, session_id)
 
     if not session or not session.rate_limit_enabled:
         print(f"DEBUG: Rate limit disabled or session {session_id} not found.")

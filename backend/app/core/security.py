@@ -1,17 +1,17 @@
-from datetime import datetime, timedelta
-import jwt
-import bcrypt
 import hashlib
-from fastapi import Depends, HTTPException, Header, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
+from datetime import datetime, timedelta
 
+import bcrypt
+import jwt
+from app.core.config import settings
 from app.db.database import get_db
 from app.db.models import User
-from app.core.config import settings
+from app.db.repository import UserRepository
+from fastapi import Depends, HTTPException, Header, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # ---------------------------------------------------------
-# Password Hashing Utilities
+#  Hashing Utilities
 # ---------------------------------------------------------
 def _pre_hash(password: str) -> bytes:
     """Pre-hash with SHA-256 to bypass bcrypt's 72-byte limit."""
@@ -27,6 +27,10 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verifies the password directly via bcrypt."""
     password_bytes = _pre_hash(plain_password)
     return bcrypt.checkpw(password_bytes, hashed_password.encode('utf-8'))
+
+def hash_ctf_flag(flag_value: str) -> str:
+    """Hashes a CTF flag value using SHA-256 for secure database storage and comparison."""
+    return hashlib.sha256(flag_value.encode('utf-8')).hexdigest()
 
 # ---------------------------------------------------------
 # JWT Utilities
@@ -73,8 +77,7 @@ async def get_current_user_secure(
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token signature")
 
-    result = await db.execute(select(User).where(User.username == username))
-    user = result.scalars().first()
+    user = await UserRepository.get_by_username(db, username)
 
     if user is None:
         raise HTTPException(status_code=401, detail="User not found")
@@ -97,6 +100,16 @@ async def get_current_user_vulnerable(authorization: str = Header(None)) -> dict
     try:
         # Intentionally vulnerable: verify_signature=False
         payload = jwt.decode(token, options={"verify_signature": False})
-        return payload
+
+        user_id = payload.get("id")
+        if not user_id:
+             raise ValueError("Token does not contain 'id'. Please re-login.")
+
+        return {
+            "sub": payload.get("sub"),
+            "id": user_id,
+            "role": payload.get("role"),
+            "lab_instance_id": payload.get("lab_instance_id")
+        }
     except Exception as e:
         raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")

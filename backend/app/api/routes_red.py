@@ -1,7 +1,9 @@
 import os
 import aiofiles
 import asyncio
-from fastapi import APIRouter, Depends, Request, Query, HTTPException, UploadFile, File, WebSocket, WebSocketDisconnect, status
+from redis import Redis
+import uuid
+from fastapi import APIRouter, Depends, Request, Query, HTTPException, UploadFile, File, WebSocket, WebSocketDisconnect, status, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy import text, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,20 +16,22 @@ from app.core.security import (
     verify_password,
     create_access_token
 )
-from app.db.models import User
 from app.services.rag_service import generate_chat_response_sse
 from app.schemas.red_team import ChatRequest, LoginRequest
 from app.services.etl_worker import ETLWorker
 from app.core.redis_client import get_redis
 from app.services.rate_limiter import enforce_rate_limit
 from app.services.siem_logger import log_security_event
+from app.core.llm_engine import get_llm_instance
+from app.db.repository import UserRepository
+
+from app.db.repository import ChatRepository
 
 router = APIRouter()
 
 @router.post("/login", tags=["Red Team Auth"])
 async def red_team_login(login_req: LoginRequest, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).where(User.username == login_req.username))
-    user = result.scalars().first()
+    user = await UserRepository.get_by_username(db, login_req.username)
 
     if not user or not verify_password(login_req.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
@@ -38,6 +42,7 @@ async def red_team_login(login_req: LoginRequest, db: AsyncSession = Depends(get
     token_data = {
         "sub": user.username,
         "role": user.role,
+        "id":str(user.id),
         "lab_instance_id": str(user.lab_instance_id)
     }
 
@@ -61,7 +66,8 @@ async def chat_ask(
     vector_store: VectorStore = Depends(get_vector_store),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user_vulnerable),
-    redis=Depends(get_redis)
+    redis=Depends(get_redis),
+    llm_instance=Depends(get_llm_instance)
 ):
     lab_id = user.get("lab_instance_id")
     client_ip = request.client.host
@@ -82,7 +88,15 @@ async def chat_ask(
     )
 
     return StreamingResponse(
-        generate_chat_response_sse(db=db, session_id=chat_req.session_id, prompt=chat_req.prompt, queue=queue, vector_store=vector_store, user=user),
+        generate_chat_response_sse(
+            db=db,
+            thread_id=chat_req.thread_id,
+            session_id=chat_req.session_id,
+            prompt=chat_req.prompt,
+            queue=queue,
+            vector_store=vector_store,
+            user=user,
+            llm_instance=llm_instance),
         media_type="text/event-stream"
     )
 
@@ -105,68 +119,126 @@ async def search_chat_history(
         source_ip=request.client.host
     )
 
-    raw_sql_query = f"SELECT * FROM chat_history WHERE session_id = '{session_id}' AND user_message LIKE '%{q}%'"
 
     try:
-        await db.execute(text("SET ROLE db_readonly"))
-        result = await db.execute(text(raw_sql_query))
-        await db.execute(text("RESET ROLE"))
-        return {"results": result.mappings().all()}
+        results, raw_query = ChatRepository.search_chat_history_vulnerable(db, session_id, q)
+        return {"results": results}
     except Exception as e:
         # Log the exact SQL error (Blue Team can see the syntax error caused by the injection)
         await log_security_event(
             db=db, lab_instance_id=lab_id, event_type="SQL_ERROR",
-            payload={"error": str(e), "failed_query": raw_sql_query}, source_ip=request.client.host
+            payload={"error": str(e), "failed_query": q}, source_ip=request.client.host
         )
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/upload", tags=["Red Team"])
 async def upload_document(
     request: Request,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     vector_store: VectorStore = Depends(get_vector_store),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(get_current_user_vulnerable)
+    user: dict = Depends(get_current_user_vulnerable),
+    redis=Depends(get_redis),
+
 ):
-    base_upload_dir = "uploads/"
-    os.makedirs(base_upload_dir, exist_ok=True)
+    task_id = uuid.uuid4()
+    redis_key = f"etl_job:{task_id}"
+    await redis.hset(redis_key, mapping={
+        "filename": file.filename,
+        "status": "Queued",
+        "progress": 0,
+        "message": "Queued..."
+    })
+
+
+    base_upload_dir = "uploads"
+    ALLOWED_PATH_PARTS = ["student_uploads"]
+
+    absBase = os.path.abspath(base_upload_dir)
+    absallowed = tuple(os.path.abspath(dir) for dir in ALLOWED_PATH_PARTS)
+
+    os.makedirs(absBase, exist_ok=True)
+    for d in ALLOWED_PATH_PARTS:
+        os.makedirs(os.path.abspath(d), exist_ok=True)
+
     vulnerable_path = os.path.join(base_upload_dir, file.filename)
+    validated_path = os.path.abspath(vulnerable_path)
 
-    await log_security_event(
-        db=db,
-        lab_instance_id=user.get("lab_instance_id"),
-        event_type="FILE_UPLOAD",
-        payload={"filename": file.filename, "destination": vulnerable_path},
-        source_ip=request.client.host
-    )
+    content = await file.read()
 
-    try:
-        content = await file.read()
-        async with aiofiles.open(vulnerable_path, 'wb') as out_file:
+    if not validated_path.startswith(absallowed) and not validated_path.startswith(absBase):
+        await log_security_event(
+            db=db,
+            lab_instance_id=user.get("lab_instance_id"),
+            event_type="FILE_UPLOAD_FAILED",
+            payload={"filename": file.filename, "reason": "Path Traversal Blocked"},
+            source_ip=request.client.host
+        )
+        raise HTTPException(status_code=403, detail="Wrong directory.")
+
+    os.makedirs(os.path.dirname(validated_path), exist_ok=True)
+    async with aiofiles.open(validated_path, 'wb') as out_file:
             await out_file.write(content)
 
-        etl = ETLWorker(vector_store)
-        chunks_inserted = await asyncio.to_thread(etl.process_pdf, content, file.filename)
+    if validated_path.startswith(absallowed):
 
-        return {"filename": file.filename, "message": "File processed.", "chunks_vectorized": chunks_inserted}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        await log_security_event(
+            db=db,
+            lab_instance_id=user.get("lab_instance_id"),
+            event_type="FILE_UPLOAD",
+            payload={"filename": file.filename, "destination": validated_path, 'indexing': 'true'},
+            source_ip=request.client.host
+        )
+
+        try:
+            etl = ETLWorker(vector_store)
+            background_tasks.add_task(etl.process_pdf, content, file.filename, task_id, redis)
+
+            return {"task_id": task_id, "message": "Processing started."}
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    else:
+
+        await log_security_event(
+            db=db,
+            lab_instance_id=user.get("lab_instance_id"),
+            event_type="FILE_UPLOAD",
+            payload={"filename": file.filename, "destination": validated_path, "indexing": "false"},
+            source_ip=request.client.host
+        )
+
+        await redis.hset(redis_key, mapping={
+            "status": "Completed (No ETL required)",
+            "progress": 100,
+            "message": "File uploaded securely."
+        })
+
+        return {
+            "task_id": str(task_id),
+            "message": "File uploaded successfully.",
+            "chunks_vectorized": 0
+        }
 
 
-@router.websocket("/ws/etl-status/{session_id}")
-async def etl_status_websocket(websocket: WebSocket, session_id: str):
+@router.websocket("/ws/etl-status/{task_id}")
+async def etl_status_websocket(websocket: WebSocket, task_id: uuid.UUID, redis: Redis = Depends(get_redis)):
+    redis_key = f"etl_job:{task_id}"
     await websocket.accept()
     try:
-        stages = [
-            {"status": "Processing", "progress": 10, "message": "Extracting text from PDF..."},
-            {"status": "Processing", "progress": 50, "message": "Chunking text with NLTK..."},
-            {"status": "Processing", "progress": 90, "message": "Generating embeddings (CPU)..."},
-            {"status": "Complete", "progress": 100, "message": "Vectors loaded into ChromaDB!"}
-        ]
+        while True:
+            redis_data = await redis.hgetall(redis_key)
+            if not redis_data:
+                await websocket.close(code=1000)
+                break
 
-        for stage in stages:
-            await asyncio.sleep(1.5)
-            await websocket.send_json(stage)
+
+            await websocket.send_json(redis_data)
+            await asyncio.sleep(0.5)
+            if int(redis_data.get("progress", 0)) >= 100:
+                await websocket.close(code=1000)
+                break
 
     except WebSocketDisconnect:
-        print(f"Client {session_id} disconnected from ETL status stream.")
+        print(f"{task_id} Finished ")

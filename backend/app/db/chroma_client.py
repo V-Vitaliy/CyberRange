@@ -31,7 +31,7 @@ class VectorStore:
             ids=ids
         )
 
-    def search_documents(self, query: str, n_results: int = 5) -> dict:
+    def search_documents(self, query: str, n_results: int = 5, where: dict=None) -> dict:
         """
         Embeds the query and searches for the most similar documents in ChromaDB.
         """
@@ -39,7 +39,8 @@ class VectorStore:
 
         results = self.collection.query(
             query_embeddings=query_embedding,
-            n_results=n_results
+            n_results=n_results,
+            where=where
         )
         return results
 

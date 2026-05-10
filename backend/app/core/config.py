@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from pydantic import ConfigDict
+import os
 
 class Settings(BaseSettings):
     """
@@ -9,6 +10,8 @@ class Settings(BaseSettings):
     # Project Info
     PROJECT_NAME: str = "AI CyberRange"
     VERSION: str = "1.0.0"
+
+    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY")
 
     # LLM Hardware Optimizations (Defaults based on g4dn.xlarge / RTX 3060)
     LLM_MODEL_PATH: str = "../../models/Meta-Llama-3-8B.Q4_K_M.gguf"
