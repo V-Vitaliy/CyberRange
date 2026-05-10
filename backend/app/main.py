@@ -5,7 +5,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.queue_manager import LLMQueueManager
 from app.db.chroma_client import VectorStore
 from app.api.routes_red import router as red_router
+from app.api.routes_ctf import router as ctf_router
 from app.api.routes_blue import router as blue_router
+from app.core.config import settings
+from app.core.llm_engine import init_groq,init_llm
 
 # 2. Sub-application for Red Team Docs
 red_app = FastAPI(
@@ -14,6 +17,7 @@ red_app = FastAPI(
     version="1.0.0",
 )
 red_app.include_router(red_router, prefix="")
+red_app.include_router(ctf_router, prefix="/ctf")
 
 # 3. Sub-application for Blue Team Docs
 blue_app = FastAPI(
@@ -28,12 +32,20 @@ async def lifespan(app: FastAPI):
     queue_manager = LLMQueueManager()
     vector_store = VectorStore()
 
+    if settings.GROQ_API_KEY:
+        llm_instance = init_groq()
+    else:
+        llm_instance = init_llm()
+
+    app.state.llm = llm_instance
     app.state.queue_manager = queue_manager
     app.state.vector_store = vector_store
 
+    red_app.state.llm = llm_instance
     red_app.state.queue_manager = queue_manager
     red_app.state.vector_store = vector_store
 
+    blue_app.state.llm = llm_instance
     blue_app.state.queue_manager = queue_manager
     blue_app.state.vector_store = vector_store
 

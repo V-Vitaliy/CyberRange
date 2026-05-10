@@ -92,6 +92,5 @@ export function useBlueTeamDashboard(sessionId: string) {
     }
   }, [token, fetchData]);
 
-  // Export all necessary methods and state
   return { token, login, logout, buyDefense, investigate, budget, logs, defenses, loading, error };
 }

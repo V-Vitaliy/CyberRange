@@ -1,12 +1,13 @@
 import re
 from datetime import datetime
 from uuid import UUID
+
+from app.db.repository import AuditLogRepository, GameSessionRepository
+from app.db.repository import GameSessionRepository, AuditLogRepository
+from app.schemas.blue_team import InvestigateResponse
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 
-from app.db.models import SecurityAuditLog, GameSession
-from app.schemas.blue_team import InvestigateResponse
 
 class MLAnalyzer:
     """
@@ -17,24 +18,31 @@ class MLAnalyzer:
     def __init__(self):
         # Compiled Regex rules for performance. (?i) enables case-insensitive matching.
         self.sqli_regex = re.compile(r"(?i)(union\s+select|select\s+.*?\s+from|drop\s+table|insert\s+into|1\s*=\s*1|'a'\s*=\s*'a'|--)")
-        self.pt_regex = re.compile(r"(?i)(\.\./|\.\.\\|%2e%2e%2f|etc/passwd|boot\.ini)")
         self.pi_regex = re.compile(r"(?i)(ignore\s+(all\s+)?previous|system\s+prompt|you\s+are\s+now|bypass\s+instructions)")
         self.jwt_regex = re.compile(r"(?i)(\"alg\"\s*:\s*\"none\"|alg:\s*none|verify_signature\s*:\s*false)")
 
-    def predict_is_malicious(self, payload: str) -> bool:
+    def predict_is_malicious(self, payload, event_type:str) -> bool:
         """
         Simulates ML prediction.
         Future implementation: return self.model.predict([payload])[0] == 1
         """
+        if event_type == "FILE_UPLOAD":
+            if payload.get("indexing") == "true":
+                return True
+            return False
+
+        if event_type == "AUTH_BYPASS_ATTEMPT":
+            if payload.get('claimed_role') != 'red_team':
+                return True
+            return False
+
         payload_str = str(payload).lower()
         return any([
             self.sqli_regex.search(payload_str),
-            self.pt_regex.search(payload_str),
             self.pi_regex.search(payload_str),
             self.jwt_regex.search(payload_str)
         ])
 
-# Initialize the ML engine (weights/patterns are loaded once at server startup)
 analyzer = MLAnalyzer()
 
 async def process_investigation(
@@ -49,8 +57,7 @@ async def process_investigation(
     and updates the game economy.
     """
     # 1. Retrieve the log entry
-    result = await db.execute(select(SecurityAuditLog).where(SecurityAuditLog.id == log_id))
-    log_entry = result.scalars().first()
+    log_entry = await AuditLogRepository.get_by_id(db, log_id)
 
     if not log_entry:
         raise HTTPException(status_code=404, detail="Log entry not found")
@@ -59,7 +66,7 @@ async def process_investigation(
         raise HTTPException(status_code=400, detail="This log has already been investigated")
 
     # 2. ML / Heuristic Prediction
-    actually_malicious = analyzer.predict_is_malicious(str(log_entry.payload))
+    actually_malicious = analyzer.predict_is_malicious(log_entry.payload, log_entry.event_type)
 
     # 3. Points Calculation
     credits_to_award = 0
@@ -83,8 +90,7 @@ async def process_investigation(
     log_entry.investigated_at = datetime.utcnow()
     log_entry.investigated_by = user_id
 
-    session_result = await db.execute(select(GameSession).where(GameSession.id == session_id))
-    game_session = session_result.scalars().first()
+    game_session = await GameSessionRepository.get_by_id(db, session_id)
 
     if not game_session:
          raise HTTPException(status_code=404, detail="Game session not found")

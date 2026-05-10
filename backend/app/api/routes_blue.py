@@ -1,31 +1,31 @@
 from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import func
 from typing import List
 
 from app.db.database import get_db
 from app.core.security import verify_password, create_access_token, get_current_user_secure
 from app.services.forensics import process_investigation
 from app.services.defense import process_defense_purchase
-from app.db.models import User, GameSession, SecurityAuditLog
+from app.db.models import User
 from app.schemas.blue_team import (
     LoginRequest, TokenResponse,
     BuyDefenseRequest, BuyDefenseResponse,
     InvestigateRequest, InvestigateResponse,
     DashboardStatsResponse, AuditLogEntry
 )
+from app.db.repository import (
+    UserRepository,
+    GameSessionRepository,
+    AuditLogRepository
+)
 
 router = APIRouter()
 
 @router.post("/login", response_model=TokenResponse, tags=["Blue Team - User"])
 async def login_blue_team(login_data: LoginRequest, db: AsyncSession = Depends(get_db)):
-    """
-    Authenticates a Blue Team user and returns a signed JWT.
-    """
-    result = await db.execute(select(User).where(User.username == login_data.username))
-    user = result.scalars().first()
+    """Authenticates a Blue Team user and returns a signed JWT."""
+    user = await UserRepository.get_by_username(db, login_data.username)
 
     if not user or not verify_password(login_data.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Incorrect username or password")
@@ -35,9 +35,11 @@ async def login_blue_team(login_data: LoginRequest, db: AsyncSession = Depends(g
 
     token_data = {
         "sub": user.username,
+        "id": str(user.id),
         "role": user.role,
         "lab_instance_id": str(user.lab_instance_id)
     }
+
     access_token = create_access_token(
         data=token_data,
         expires_delta=timedelta(minutes=60)
@@ -57,7 +59,7 @@ async def get_my_profile(current_user: User = Depends(get_current_user_secure)):
 @router.post("/defenses/buy", response_model=BuyDefenseResponse, tags=["Blue Team - Shop"])
 async def buy_defense(
     request_data: BuyDefenseRequest,
-    current_user: User = Depends(get_current_user_secure), # Protected!
+    current_user: User = Depends(get_current_user_secure),
     db: AsyncSession = Depends(get_db)
 ):
     """Allows Blue Team to spend their defense budget on security patches."""
@@ -89,42 +91,24 @@ async def get_dashboard_stats(
     db: AsyncSession = Depends(get_db)
 ):
     """Aggregates metrics for the Blue Team React Dashboard (KPI cards)."""
-    # 1. Fetch Session for budget and active defenses
-    result = await db.execute(select(GameSession).where(GameSession.id == session_id))
-    game_session = result.scalars().first()
+    game_session = await GameSessionRepository.get_by_id(db, session_id)
 
     if not game_session:
         raise HTTPException(status_code=404, detail="Game session not found.")
 
     active_defenses = {
-        "system_prompt_overridden": game_session.system_prompt != "You are a helpful university assistant.",
+        "prompt_hardening_enabled": game_session.system_prompt != "You are a helpful university assistant.",
         "rate_limit_enabled": game_session.rate_limit_enabled,
         "reranker_enabled": game_session.use_reranker,
         "jwt_filter_enabled": game_session.jwt_filter_enabled
     }
 
-    # 2. Fast SQL Aggregations for Logs
-    total_res = await db.execute(select(func.count(SecurityAuditLog.id)).where(SecurityAuditLog.lab_instance_id == game_session.lab_instance_id))
-    total_logs = total_res.scalar() or 0
-
-    comp_res = await db.execute(select(func.count(SecurityAuditLog.id)).where(
-        SecurityAuditLog.lab_instance_id == game_session.lab_instance_id,
-        SecurityAuditLog.is_compromised == True
-    ))
-    compromised_logs = comp_res.scalar() or 0
-
-    pend_res = await db.execute(select(func.count(SecurityAuditLog.id)).where(
-        SecurityAuditLog.lab_instance_id == game_session.lab_instance_id,
-        SecurityAuditLog.investigated_at.is_(None)
-    ))
-    pending_investigations = pend_res.scalar() or 0
+    stats = await AuditLogRepository.get_stats(db, game_session.lab_instance_id)
 
     return DashboardStatsResponse(
         budget=game_session.defense_budget,
         active_defenses=active_defenses,
-        total_logs=total_logs,
-        compromised_logs=compromised_logs,
-        pending_investigations=pending_investigations
+        **stats
     )
 
 @router.get("/logs", response_model=List[AuditLogEntry], tags=["Blue Team - SIEM"])
@@ -135,16 +119,8 @@ async def get_audit_logs(
     db: AsyncSession = Depends(get_db)
 ):
     """Fetches raw SIEM logs for the investigation table."""
-    result = await db.execute(select(GameSession).where(GameSession.id == session_id))
-    game_session = result.scalars().first()
+    game_session = await GameSessionRepository.get_by_id(db, session_id)
     if not game_session:
         raise HTTPException(status_code=404, detail="Game session not found.")
 
-    logs_result = await db.execute(
-        select(SecurityAuditLog)
-        .where(SecurityAuditLog.lab_instance_id == game_session.lab_instance_id)
-        .order_by(SecurityAuditLog.timestamp.desc())
-        .limit(limit)
-    )
-
-    return list(logs_result.scalars().all())
+    return await AuditLogRepository.get_logs(db, game_session.lab_instance_id, limit)

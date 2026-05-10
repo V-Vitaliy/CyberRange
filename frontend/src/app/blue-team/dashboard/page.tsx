@@ -30,6 +30,13 @@ function DashboardContent() {
     if (selectedEvent) setInvestigateId(selectedEvent.id);
   }, [selectedEvent]);
 
+  // МАППИНГ: Исправляем несоответствие названий между фронтендом и бэкендом
+  const handleBuyDefense = (id: string) => {
+    // В базе и defense.py защита называется "system_prompt", а в UI "prompt_hardening"
+    const backendId = id === 'prompt_hardening' ? 'system_prompt' : id;
+    buyDefense(backendId);
+  };
+
   if (!token) {
     return (
       <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center p-4">
@@ -70,7 +77,7 @@ function DashboardContent() {
       <DefensePanel
         budget={budget}
         defenses={defenses}
-        onBuyDefense={(id) => buyDefense(id)}
+        onBuyDefense={handleBuyDefense}
       />
 
       <main className="flex-1 flex flex-col h-screen overflow-hidden">
@@ -95,10 +102,12 @@ function DashboardContent() {
             <h3 className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest flex items-center gap-2 mb-2">
               <Activity size={14} className="text-indigo-500" /> {t.chartTitle}
             </h3>
-            <ActivityChart data={[]} />
+            {/* УБРАЛИ ФИЛЬТР: Теперь передаем сырые логи (logs) */}
+            <ActivityChart data={logs} />
           </section>
 
           <div className="flex-1 flex gap-6 overflow-hidden pb-4">
+            {/* УБРАЛИ ФИЛЬТР: Теперь передаем сырые логи (logs) */}
             <EventTable
               events={logs}
               selectedEventId={selectedEvent?.id}
