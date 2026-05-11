@@ -30,6 +30,7 @@ class GameSession(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     team_id = Column(UUID(as_uuid=True), nullable=False)
     lab_instance_id = Column(UUID(as_uuid=True), nullable=False)
+    is_solo: bool = Column(Boolean, default=False)
 
     # Starting budget for the Blue Team
     defense_budget = Column(Integer, default=5)

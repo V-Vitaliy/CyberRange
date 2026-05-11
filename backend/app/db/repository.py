@@ -61,21 +61,23 @@ class ChatRepository:
     @staticmethod
     async def get_or_create_thread(
         db: AsyncSession,
-        thread_id: Optional[str | uuid.UUID],
+        thread_id: str | uuid.UUID,
         user_id: str | uuid.UUID,
         session_id: str | uuid.UUID,
         initial_prompt: str
     ) -> ChatThread:
-        """Retrieves an existing thread or creates a new one if it doesn't exist."""
-        if thread_id:
-            result = await db.execute(select(ChatThread).where(ChatThread.id == ensure_uuid(thread_id)))
-            thread = result.scalars().first()
-            if thread:
-                return thread
+        """Retrieves an existing thread"""
+        if not thread_id:
+            raise ValueError("Thread ID is required from the client")
 
-        # Create a new thread
+        result = await db.execute(select(ChatThread).where(ChatThread.id == ensure_uuid(thread_id)))
+        thread = result.scalars().first()
+
+        if thread:
+            return thread
+
         new_thread = ChatThread(
-            id=ensure_uuid(thread_id) if thread_id else uuid.uuid4(),
+            id=ensure_uuid(thread_id),
             user_id=ensure_uuid(user_id),
             session_id=ensure_uuid(session_id),
             title=initial_prompt[:30] + "..." if len(initial_prompt) > 30 else initial_prompt,
@@ -85,6 +87,7 @@ class ChatRepository:
         await db.commit()
         await db.refresh(new_thread)
         return new_thread
+
 
     @staticmethod
     async def append_messages(
