@@ -1,6 +1,7 @@
-from pydantic_settings import BaseSettings
-from pydantic import ConfigDict
-import os
+from pydantic_settings import BaseSettings,SettingsConfigDict
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parents[3]
 
 class Settings(BaseSettings):
     """
@@ -11,7 +12,7 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "AI CyberRange"
     VERSION: str = "1.0.0"
 
-    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY")
+    GROQ_API_KEY: str
 
     # LLM Hardware Optimizations (Defaults based on g4dn.xlarge / RTX 3060)
     LLM_MODEL_PATH: str = "../../models/Meta-Llama-3-8B.Q4_K_M.gguf"
@@ -46,7 +47,13 @@ class Settings(BaseSettings):
 
     REDIS_URL: str = "redis://localhost:6379"
 
-    model_config = ConfigDict(env_file=".env", extra="ignore")
+    SMTP_HOST: str
+    SMTP_PORT: int
+    SMTP_USER: str
+    SMTP_PASSWORD: str
 
-# Global settings instance to be imported across the app
+    model_config = SettingsConfigDict( env_file=str(ROOT_DIR / ".env"),
+                                      env_file_encoding="utf-8",
+                                      extra="ignore")
+
 settings = Settings()

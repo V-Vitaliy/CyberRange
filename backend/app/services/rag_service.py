@@ -3,7 +3,7 @@ import json
 import re
 from uuid import UUID
 
-from app.core.llm_engine import generate_stream, generate_stream_groq
+from app.core.llm_engine import generate_unified_stream
 from app.core.prompt_builder import PromptBuilder
 from app.core.queue_manager import LLMQueueManager
 from app.db.chroma_client import VectorStore
@@ -32,13 +32,19 @@ async def generate_chat_response_sse(
     llm_instance
 ):
     try:
-        thread = await ChatRepository.get_or_create_thread(
-                    db=db,
-                    thread_id=thread_id,
-                    user_id=user.get("id"),
-                    session_id=session_id,
-                    initial_prompt=prompt
-                    )
+        user_id = user.get('id')
+        if not user_id:
+            yield f"data: {json.dumps({'error': 'Invalid token: Missing user ID'})}\n\n"
+            return
+
+        await ChatRepository.get_or_create_thread(
+                db=db,
+                thread_id=thread_id,
+                user_id=user.get("id"),
+                session_id=session_id,
+                initial_prompt=prompt
+                )
+
         session = await GameSessionRepository.get_by_id(db, session_id)
 
         if not session:
@@ -62,20 +68,24 @@ async def generate_chat_response_sse(
 
         clean_username = re.sub(r'[^a-zA-Z0-9_]', '', user.get('username', 'Guest')) or 'Guest'
 
-        full_prompt = PromptBuilder.build_prompt(
+        system_prompt, human_prompt = PromptBuilder.build_prompts(
             user_query=prompt,
             context_chunks=context_texts,
             system_instruction=session.system_prompt,
             username=clean_username
         )
+        print(system_prompt)
+        print(human_prompt)
 
         async def llm_task():
-            if isinstance(llm_instance, AsyncGroq):
-                async for chunk in generate_stream_groq(llm_instance, full_prompt):
-                    yield chunk
-            else:
-                async for chunk in generate_stream(llm_instance, full_prompt):
-                    yield chunk
+            async for chunk in generate_unified_stream(
+                llm_instance=llm_instance,
+                system_prompt=system_prompt,
+                human_prompt=human_prompt,
+                db=db,
+                lab_instance_id=str(session.lab_instance_id)
+            ):
+                yield chunk
 
         full_ai_response = ""
 
@@ -86,7 +96,7 @@ async def generate_chat_response_sse(
 
         await ChatRepository.append_messages(
             db=db,
-            thread_id = thread.id,
+            thread_id = thread_id,
             prompt=prompt,
             ai_response=full_ai_response
             )

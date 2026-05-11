@@ -17,3 +17,8 @@ sentence_transformers
 asyncpg
 python-multipart
 tiktoken
+langchain
+langchain-core
+langchain-community
+langchain-groq
+langgraph

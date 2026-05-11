@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import asyncio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -9,6 +10,7 @@ from app.api.routes_ctf import router as ctf_router
 from app.api.routes_blue import router as blue_router
 from app.core.config import settings
 from app.core.llm_engine import init_groq,init_llm
+from app.services.soc_worker import run_soc_analyst_loop
 
 # 2. Sub-application for Red Team Docs
 red_app = FastAPI(
@@ -31,6 +33,7 @@ blue_app.include_router(blue_router, prefix="")
 async def lifespan(app: FastAPI):
     queue_manager = LLMQueueManager()
     vector_store = VectorStore()
+    soc_task = asyncio.create_task(run_soc_analyst_loop())
 
     if settings.GROQ_API_KEY:
         llm_instance = init_groq()
@@ -50,6 +53,7 @@ async def lifespan(app: FastAPI):
     blue_app.state.vector_store = vector_store
 
     yield
+    soc_task.cancel()
 
 app = FastAPI(
     title="AI Security CyberRange API",
