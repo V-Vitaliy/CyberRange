@@ -1,24 +1,2 @@
-fastapi
-uvicorn
-sqlalchemy
-psycopg2-binary
-redis
+-r requirements-groq.txt
 llama-cpp-python
-python-jose[cryptography]
-pydantic_settings
-chromadb
-PyJWT
-pypdf
-nltk
-aiofiles
-alembic
-passlib[bcrypt]
-sentence_transformers
-asyncpg
-python-multipart
-tiktoken
-langchain
-langchain-core
-langchain-community
-langchain-groq
-langgraph

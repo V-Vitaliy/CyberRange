@@ -14,12 +14,6 @@ from app.db.chroma_client import VectorStore
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-try:
-    nltk.data.find('tokenizers/punkt_tab')
-except LookupError:
-    logger.info("Downloading NLTK 'punkt_tab' dataset...")
-    nltk.download('punkt_tab', quiet=True)
-
 class ETLWorker:
     def __init__(self, vector_store: VectorStore):
         self.vector_store = vector_store
@@ -62,7 +56,8 @@ class ETLWorker:
 
         return chunks
 
-    async def process_pdf(self, file_content: bytes, filename: str, task_id: UUID, redis: Redis, access_level: str= 'public') -> int:
+    async def process_pdf(self, file_content: bytes, filename: str, task_id: UUID, redis: Redis, lab_instance_id: UUID, access_level: str= 'public') -> int:
+        lab_instance_id = str(UUID(str(lab_instance_id)))
         logger.info(f"Starting ETL pipeline for file: {filename}")
 
         redis_key = f"etl_job:{task_id}"
@@ -121,6 +116,7 @@ class ETLWorker:
             for i, chunk in enumerate(chunks):
                 metadatas.append({
                     "source": filename,
+                    "lab_instance_id": lab_instance_id,
                     "access_level" : access_level,
                     "chunk_id": i,
                     "token_length": self._estimate_tokens(chunk)

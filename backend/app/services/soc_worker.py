@@ -1,17 +1,17 @@
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.db.database import async_session
 from app.db.models import SecurityAuditLog, GameSession
-from app.agents.soc_agent import soc_graph
+from app.agents.soc_agent import AnalysisOutput
 
 logger = logging.getLogger(__name__)
 
-async def run_soc_analyst_loop():
+async def run_soc_analyst_loop(soc_graph, queue):
     """
     Continuous background task that polls the database for uninvestigated security logs.
     ONLY analyzes logs for lab instances where 'is_solo' == True.
@@ -28,6 +28,8 @@ async def run_soc_analyst_loop():
                         SecurityAuditLog.investigated_at.is_(None),
                         GameSession.is_solo == True
                     )
+                    .order_by(SecurityAuditLog.timestamp)
+                    .with_for_update(skip_locked=True, of=SecurityAuditLog)
                     .limit(5)
                 )
                 result = await db.execute(stmt)
@@ -43,14 +45,20 @@ async def run_soc_analyst_loop():
                         "reasoning": ""
                     }
 
-                    # 3. Execute the Graph
-                    final_state = await soc_graph.ainvoke(initial_state)
+                    try:
+                        # The local SOC and chat share the same GPU/model instance.
+                        async with queue.gpu_lock:
+                            final_state = await soc_graph.ainvoke(initial_state)
+                        verdict = AnalysisOutput.model_validate(final_state)
+                    except Exception:
+                        logger.exception("[SOC Worker] Analysis failed for log %s; left pending", log.id)
+                        continue
 
-                    log.investigated_at = datetime.utcnow()
-                    log.is_compromised = final_state["is_malicious"]
+                    log.investigated_at = datetime.now(timezone.utc)
+                    log.is_compromised = verdict.is_malicious
 
                     updated_payload = dict(log.payload) if log.payload else {}
-                    updated_payload["soc_reasoning"] = final_state["reasoning"]
+                    updated_payload["soc_reasoning"] = verdict.reasoning
                     log.payload = updated_payload
 
                     flag_modified(log, "payload")

@@ -8,6 +8,8 @@ Overview
 
 Unlike traditional "black-box" testing via external APIs, this platform provides a fully controlled On-Premise or Hybrid Cloud infrastructure. Students and cybersecurity professionals can explore, attack, and defend systems against threats outlined in standards like the **OWASP Top 10 for LLM Applications**.
 
+Local setup with Groq: see [LOCAL_RUN.md](LOCAL_RUN.md) for environment preparation, commands and the remaining database prerequisites.
+
 Game Modes (Red vs. Blue)
 -------------------------
 

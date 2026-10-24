@@ -1,5 +1,5 @@
 "use client"
-import React from 'react';
+import React, { useState } from 'react';
 import { Database, Search } from 'lucide-react';
 import { useLanguage } from '@/context/LanguageContext';
 import { SiemEvent } from '@/types/blue-team';
@@ -8,11 +8,13 @@ interface Props {
   selectedEvent: SiemEvent | null;
   investigateId: string;
   setInvestigateId: (id: string) => void;
-  onInvestigate: () => void;
+  onInvestigate: (isMalicious: boolean) => void;
+  disabled?: boolean;
 }
 
-export default function LogTerminal({ selectedEvent, investigateId, setInvestigateId, onInvestigate }: Props) {
-  const { t } = useLanguage();
+export default function LogTerminal({ selectedEvent, investigateId, setInvestigateId, onInvestigate, disabled = false }: Props) {
+  const { t, lang } = useLanguage();
+  const [isMalicious, setIsMalicious] = useState(true);
 
   return (
     <div className="flex-[2] flex flex-col gap-6 h-full overflow-hidden">
@@ -48,9 +50,13 @@ export default function LogTerminal({ selectedEvent, investigateId, setInvestiga
           />
         </div>
 
+        <label className="flex gap-2 text-xs text-neutral-300">
+          <input type="checkbox" checked={isMalicious} onChange={e => setIsMalicious(e.target.checked)} />
+          {lang === 'pl' ? 'Zdarzenie złośliwe (odznacz dla bezpiecznego)' : 'Malicious event (uncheck for safe)'}
+        </label>
         <button
-          onClick={onInvestigate}
-          disabled={!investigateId}
+          onClick={() => onInvestigate(isMalicious)}
+          disabled={disabled || !investigateId || Boolean(selectedEvent?.id === investigateId && selectedEvent.investigated_at)}
           className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-neutral-800 disabled:text-neutral-600 text-white font-bold py-2.5 rounded-lg text-[10px] uppercase tracking-widest transition-all"
         >
           {t.investigateBtn}

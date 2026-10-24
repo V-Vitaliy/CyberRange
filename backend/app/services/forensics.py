@@ -1,9 +1,8 @@
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 from app.db.repository import AuditLogRepository, GameSessionRepository
-from app.db.repository import GameSessionRepository, AuditLogRepository
 from app.schemas.blue_team import InvestigateResponse
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -57,13 +56,17 @@ async def process_investigation(
     and updates the game economy.
     """
     # 1. Retrieve the log entry
-    log_entry = await AuditLogRepository.get_by_id(db, log_id)
+    log_entry = await AuditLogRepository.get_by_id(db, log_id, for_update=True)
 
     if not log_entry:
         raise HTTPException(status_code=404, detail="Log entry not found")
 
     if log_entry.investigated_at is not None:
         raise HTTPException(status_code=400, detail="This log has already been investigated")
+
+    game_session = await GameSessionRepository.get_by_id(db, session_id, for_update=True)
+    if not game_session or game_session.lab_instance_id != log_entry.lab_instance_id:
+        raise HTTPException(status_code=404, detail="Log entry not found for this session")
 
     # 2. ML / Heuristic Prediction
     actually_malicious = analyzer.predict_is_malicious(log_entry.payload, log_entry.event_type)
@@ -87,13 +90,8 @@ async def process_investigation(
             log_entry.is_compromised = True
 
     # 4. Database Updates
-    log_entry.investigated_at = datetime.utcnow()
+    log_entry.investigated_at = datetime.now(timezone.utc)
     log_entry.investigated_by = user_id
-
-    game_session = await GameSessionRepository.get_by_id(db, session_id)
-
-    if not game_session:
-         raise HTTPException(status_code=404, detail="Game session not found")
 
     # Update economy budget
     game_session.defense_budget += credits_to_award

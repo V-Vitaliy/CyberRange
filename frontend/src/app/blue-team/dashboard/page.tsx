@@ -1,5 +1,5 @@
 "use client"
-import React, { useState, Suspense, useEffect } from 'react';
+import React, { useState, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Shield, RefreshCw, Activity, Globe, LogOut, ArrowLeft } from 'lucide-react';
 
@@ -8,6 +8,7 @@ import { useBlueTeamDashboard } from '@/hooks/useBlueTeamDashboard';
 import ActivityChart from '@/components/blue-team/ActivityChart';
 import EventTable from '@/components/blue-team/EventTable';
 import LogTerminal from '@/components/blue-team/LogTerminal';
+import { SiemEvent } from '@/types/blue-team';
 import DefensePanel from '@/components/blue-team/DefensePanel';
 
 function DashboardContent() {
@@ -15,20 +16,16 @@ function DashboardContent() {
   const searchParams = useSearchParams();
   const { t, lang, setLang } = useLanguage();
 
-  const sessionId = searchParams.get('session_id') || "33333333-3333-3333-3333-333333333333";
+  const requestedSessionId = searchParams.get('session_id');
 
   const {
     token, login, logout, buyDefense, investigate,
-    budget, logs, defenses, loading, error
-  } = useBlueTeamDashboard(sessionId);
+    budget, logs, defenses, loading, busy, error, sessionId
+  } = useBlueTeamDashboard(requestedSessionId);
 
-  const [selectedEvent, setSelectedEvent] = useState<any>(null);
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const selectedEvent = logs.find(event => event.id === selectedEventId) || null;
   const [investigateId, setInvestigateId] = useState('');
-
-  // Sync input with selected event ID
-  useEffect(() => {
-    if (selectedEvent) setInvestigateId(selectedEvent.id);
-  }, [selectedEvent]);
 
   // МАППИНГ: Исправляем несоответствие названий между фронтендом и бэкендом
   const handleBuyDefense = (id: string) => {
@@ -56,9 +53,10 @@ function DashboardContent() {
           <h2 className="text-2xl font-bold text-center mb-2 text-white">{t.loginTitle}</h2>
           <p className="text-neutral-500 text-center text-xs mb-8 uppercase tracking-widest">{t.loginSub}</p>
 
-          <form onSubmit={(e: any) => {
+          <form onSubmit={(e: React.FormEvent<HTMLFormElement>) => {
             e.preventDefault();
-            login(e.target.username.value, e.target.password.value);
+            const data = new FormData(e.currentTarget);
+            login(String(data.get('username') || ''), String(data.get('password') || ''));
           }} className="space-y-4">
             <input name="username" placeholder={t.username} defaultValue="blue_defender" className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3 text-sm outline-none focus:border-indigo-500 transition-colors" />
             <input name="password" type="password" placeholder={t.password} defaultValue="secret" className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3 text-sm outline-none focus:border-indigo-500 transition-colors" />
@@ -78,6 +76,7 @@ function DashboardContent() {
         budget={budget}
         defenses={defenses}
         onBuyDefense={handleBuyDefense}
+        disabled={busy || !sessionId}
       />
 
       <main className="flex-1 flex flex-col h-screen overflow-hidden">
@@ -98,6 +97,7 @@ function DashboardContent() {
         </header>
 
         <div className="p-6 flex-1 overflow-hidden flex flex-col gap-6">
+          {error && <p role="alert" className="text-red-400 text-xs shrink-0">{error}</p>}
           <section className="bg-neutral-900/20 border border-neutral-800 rounded-2xl p-6 shrink-0">
             <h3 className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest flex items-center gap-2 mb-2">
               <Activity size={14} className="text-indigo-500" /> {t.chartTitle}
@@ -111,13 +111,14 @@ function DashboardContent() {
             <EventTable
               events={logs}
               selectedEventId={selectedEvent?.id}
-              onSelectEvent={setSelectedEvent}
+              onSelectEvent={(event: SiemEvent) => { setSelectedEventId(event.id); setInvestigateId(event.id); }}
             />
             <LogTerminal
               selectedEvent={selectedEvent}
               investigateId={investigateId}
               setInvestigateId={setInvestigateId}
-              onInvestigate={() => investigate(investigateId)}
+              onInvestigate={(isMalicious) => investigate(investigateId, isMalicious)}
+              disabled={busy || !sessionId}
             />
           </div>
         </div>

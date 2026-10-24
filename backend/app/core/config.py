@@ -12,7 +12,8 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "AI CyberRange"
     VERSION: str = "1.0.0"
 
-    GROQ_API_KEY: str
+    # An empty key selects the existing local LLM path.
+    GROQ_API_KEY: str = ""
 
     # LLM Hardware Optimizations (Defaults based on g4dn.xlarge / RTX 3060)
     LLM_MODEL_PATH: str = "../../models/Meta-Llama-3-8B.Q4_K_M.gguf"
@@ -47,10 +48,11 @@ class Settings(BaseSettings):
 
     REDIS_URL: str = "redis://localhost:6379"
 
-    SMTP_HOST: str
-    SMTP_PORT: int
-    SMTP_USER: str
-    SMTP_PASSWORD: str
+    # An empty host selects EmailService's existing mock behavior.
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
 
     model_config = SettingsConfigDict( env_file=str(ROOT_DIR / ".env"),
                                       env_file_encoding="utf-8",

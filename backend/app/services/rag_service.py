@@ -4,12 +4,12 @@ import re
 from uuid import UUID
 
 from app.core.llm_engine import generate_unified_stream
+from app.core.security import get_authorized_session
 from app.core.prompt_builder import PromptBuilder
 from app.core.queue_manager import LLMQueueManager
 from app.db.chroma_client import VectorStore
 from app.db.repository import ChatRepository
 from app.db.repository import GameSessionRepository
-from groq import AsyncGroq
 from sqlalchemy.ext.asyncio import AsyncSession
 
 _reranker = None
@@ -37,21 +37,16 @@ async def generate_chat_response_sse(
             yield f"data: {json.dumps({'error': 'Invalid token: Missing user ID'})}\n\n"
             return
 
+        session = await get_authorized_session(db, session_id, user["lab_instance_id"])
         await ChatRepository.get_or_create_thread(
-                db=db,
-                thread_id=thread_id,
-                user_id=user.get("id"),
-                session_id=session_id,
-                initial_prompt=prompt
-                )
+            db=db, thread_id=thread_id, user_id=user_id,
+            session_id=session_id, initial_prompt=prompt,
+        )
 
-        session = await GameSessionRepository.get_by_id(db, session_id)
-
-        if not session:
-            yield f"data: {json.dumps({'error': 'Game Session not found'})}\n\n"
-            return
-
-        where = None if user.get("role") == "admin" else {'access_level': 'public'}
+        lab_filter = {"lab_instance_id": str(session.lab_instance_id)}
+        where = lab_filter if user.get("role") == "admin" else {
+            "$and": [lab_filter, {"access_level": "public"}]
+        }
 
         retrieved_docs = vector_store.search_documents(prompt, n_results=5, where=where)
         context_texts = []
@@ -66,7 +61,7 @@ async def generate_chat_response_sse(
             scored_docs.sort(key=lambda x: x[0], reverse=True)
             context_texts = [doc for score, doc in scored_docs[:2] if score > 0]
 
-        clean_username = re.sub(r'[^a-zA-Z0-9_]', '', user.get('username', 'Guest')) or 'Guest'
+        clean_username = re.sub(r'[^a-zA-Z0-9_]', '', user.get('sub', 'Guest')) or 'Guest'
 
         system_prompt, human_prompt = PromptBuilder.build_prompts(
             user_query=prompt,
@@ -74,8 +69,6 @@ async def generate_chat_response_sse(
             system_instruction=session.system_prompt,
             username=clean_username
         )
-        print(system_prompt)
-        print(human_prompt)
 
         async def llm_task():
             async for chunk in generate_unified_stream(

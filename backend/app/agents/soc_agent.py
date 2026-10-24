@@ -1,10 +1,10 @@
 import logging
 from typing import TypedDict, Dict, Any
+from functools import partial
 from pydantic import BaseModel, Field
 
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import StateGraph, END
-from app.core.llm_engine import init_groq
 
 logger = logging.getLogger(__name__)
 
@@ -21,13 +21,6 @@ class SOCState(TypedDict):
 class AnalysisOutput(BaseModel):
     is_malicious: bool = Field(description="Set to True if this is an explicit attack, False if it's normal behavior.")
     reasoning: str = Field(description="A short, 1-sentence explanation of the verdict.")
-
-# ---------------------------------------------------------
-# GLOBAL LLM INITIALIZATION
-# ---------------------------------------------------------
-soc_llm = init_groq()
-
-structured_llm = soc_llm.with_structured_output(AnalysisOutput)
 
 soc_prompt = ChatPromptTemplate.from_messages([
     (
@@ -46,12 +39,10 @@ soc_prompt = ChatPromptTemplate.from_messages([
     )
 ])
 
-analysis_chain = soc_prompt | structured_llm
-
 # ---------------------------------------------------------
 # GRAPH NODES
 # ---------------------------------------------------------
-async def analyze_security_log(state: SOCState) -> Dict[str, Any]:
+async def analyze_security_log(state: SOCState, *, analysis_chain) -> Dict[str, Any]:
     logger.info(f"[SOC Agent] Analyzing log: {state['event_type']}")
 
     try:
@@ -59,18 +50,21 @@ async def analyze_security_log(state: SOCState) -> Dict[str, Any]:
             "event_type": state["event_type"],
             "payload": state["payload"]
         })
+        result = AnalysisOutput.model_validate(result)
         return {"is_malicious": result.is_malicious, "reasoning": result.reasoning}
 
     except Exception as e:
         logger.error(f"[SOC Agent] LLM Analysis failed: {e}")
-        return {"is_malicious": False, "reasoning": "Analysis failed due to LLM tool-calling error. Assumed safe."}
+        raise
 
 # ---------------------------------------------------------
 # GRAPH COMPILATION
 # ---------------------------------------------------------
-workflow = StateGraph(SOCState)
-workflow.add_node("analyze", analyze_security_log)
-workflow.set_entry_point("analyze")
-workflow.add_edge("analyze", END)
-
-soc_graph = workflow.compile()
+def create_soc_graph(llm):
+    """Build SOC lazily from the model selected by the application."""
+    chain = soc_prompt | llm.with_structured_output(AnalysisOutput)
+    workflow = StateGraph(SOCState)
+    workflow.add_node("analyze", partial(analyze_security_log, analysis_chain=chain))
+    workflow.set_entry_point("analyze")
+    workflow.add_edge("analyze", END)
+    return workflow.compile()

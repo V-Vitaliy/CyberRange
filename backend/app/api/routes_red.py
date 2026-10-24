@@ -13,6 +13,7 @@ from app.db.database import get_db
 from app.db.chroma_client import VectorStore, get_vector_store
 from app.core.security import (
     get_current_user_vulnerable,
+    get_authorized_session,
     verify_password,
     create_access_token
 )
@@ -72,7 +73,13 @@ async def chat_ask(
     lab_id = user.get("lab_instance_id")
     client_ip = request.client.host
 
+    await get_authorized_session(db, chat_req.session_id, lab_id)
     await enforce_rate_limit(db=db, redis=redis, session_id=chat_req.session_id, client_ip=client_ip)
+    # Validate thread ownership before streaming starts.
+    await ChatRepository.get_or_create_thread(
+        db, chat_req.thread_id, user["id"], chat_req.session_id, chat_req.prompt
+    )
+
 
     # Log the LLM Prompt
     await log_security_event(
@@ -110,6 +117,8 @@ async def search_chat_history(
 ):
     lab_id = user.get("lab_instance_id", "00000000-0000-0000-0000-000000000000")
 
+    await get_authorized_session(db, session_id, lab_id)
+
     # Log the potential SQLi query
     await log_security_event(
         db=db,
@@ -146,28 +155,33 @@ async def upload_document(
     redis_key = f"etl_job:{task_id}"
     await redis.hset(redis_key, mapping={
         "filename": file.filename,
+        "user_id": user["id"],
+        "lab_instance_id": user["lab_instance_id"],
         "status": "Queued",
         "progress": 0,
         "message": "Queued..."
     })
 
 
-    base_upload_dir = "uploads"
-    ALLOWED_PATH_PARTS = ["student_uploads"]
+    # Keep the uploads -> student_uploads traversal exercise inside this lab.
+    lab_root = os.path.realpath(os.path.join("lab_uploads", user["lab_instance_id"]))
+    await redis.expire(redis_key, 3600)
+    base_upload_dir = os.path.join(lab_root, "uploads")
+    ALLOWED_PATH_PARTS = [os.path.join(lab_root, "student_uploads")]
 
-    absBase = os.path.abspath(base_upload_dir)
-    absallowed = tuple(os.path.abspath(dir) for dir in ALLOWED_PATH_PARTS)
+    absBase = os.path.realpath(base_upload_dir)
+    absallowed = tuple(os.path.realpath(dir) for dir in ALLOWED_PATH_PARTS)
 
     os.makedirs(absBase, exist_ok=True)
     for d in ALLOWED_PATH_PARTS:
         os.makedirs(os.path.abspath(d), exist_ok=True)
 
     vulnerable_path = os.path.join(base_upload_dir, file.filename)
-    validated_path = os.path.abspath(vulnerable_path)
+    validated_path = os.path.realpath(vulnerable_path)
 
     content = await file.read()
 
-    if not validated_path.startswith(absallowed) and not validated_path.startswith(absBase):
+    if not any(os.path.commonpath([validated_path, root]) == root for root in (*absallowed, absBase)):
         await log_security_event(
             db=db,
             lab_instance_id=user.get("lab_instance_id"),
@@ -181,7 +195,7 @@ async def upload_document(
     async with aiofiles.open(validated_path, 'wb') as out_file:
             await out_file.write(content)
 
-    if validated_path.startswith(absallowed):
+    if any(os.path.commonpath([validated_path, root]) == root for root in absallowed):
 
         await log_security_event(
             db=db,
@@ -193,7 +207,10 @@ async def upload_document(
 
         try:
             etl = ETLWorker(vector_store)
-            background_tasks.add_task(etl.process_pdf, content, file.filename, task_id, redis)
+            background_tasks.add_task(
+                etl.process_pdf, content, file.filename, task_id, redis,
+                uuid.UUID(user["lab_instance_id"]),
+            )
 
             return {"task_id": task_id, "message": "Processing started."}
         except Exception as e:
@@ -223,7 +240,19 @@ async def upload_document(
 
 
 @router.websocket("/ws/etl-status/{task_id}")
-async def etl_status_websocket(websocket: WebSocket, task_id: uuid.UUID, redis: Redis = Depends(get_redis)):
+async def etl_status_websocket(
+    websocket: WebSocket, task_id: uuid.UUID,
+    redis: Redis = Depends(get_redis), db: AsyncSession = Depends(get_db),
+):
+    try:
+        user = await get_current_user_vulnerable(websocket.headers.get("authorization"), db)
+    except HTTPException:
+        await websocket.close(code=1008)
+        return
+    job = await redis.hgetall(f"etl_job:{task_id}")
+    if job.get("user_id") != user["id"] or job.get("lab_instance_id") != user["lab_instance_id"]:
+        await websocket.close(code=1008)
+        return
     redis_key = f"etl_job:{task_id}"
     await websocket.accept()
     try:

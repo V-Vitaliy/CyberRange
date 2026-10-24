@@ -1,0 +1,24 @@
+# Existing runtime dependencies for Groq; no local llama-cpp build.
+fastapi
+uvicorn
+sqlalchemy[asyncio]
+psycopg2-binary
+redis
+python-jose[cryptography]
+pydantic_settings
+chromadb
+PyJWT
+pypdf
+nltk
+aiofiles
+alembic
+passlib[bcrypt]
+sentence_transformers
+asyncpg
+python-multipart
+tiktoken
+langchain
+langchain-core
+langchain-community
+langchain-groq
+langgraph

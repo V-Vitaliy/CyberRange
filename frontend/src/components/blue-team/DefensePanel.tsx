@@ -5,11 +5,12 @@ import { DefenseOption } from "@/types/blue-team";
 
 interface Props {
   budget: number;
+  disabled?: boolean;
   defenses: DefenseOption[];
   onBuyDefense: (id: string, cost: number) => void;
 }
 
-export default function DefensePanel({ budget, defenses, onBuyDefense }: Props) {
+export default function DefensePanel({ budget, defenses, onBuyDefense, disabled = false }: Props) {
   return (
     <aside className="w-80 bg-neutral-900 border-r border-neutral-800 flex flex-col z-10">
       <div className="h-14 flex items-center px-6 border-b border-neutral-800 bg-neutral-950">
@@ -34,7 +35,7 @@ export default function DefensePanel({ budget, defenses, onBuyDefense }: Props) 
 
               <button
                 onClick={() => onBuyDefense(defense.id, defense.cost)}
-                disabled={defense.enabled || budget < defense.cost}
+                disabled={disabled || defense.enabled || budget < defense.cost}
                 className={`w-full py-2 rounded text-xs font-medium transition-all flex justify-center items-center gap-2 
                   ${defense.enabled 
                     ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 cursor-not-allowed' 

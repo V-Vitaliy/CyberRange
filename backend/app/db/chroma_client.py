@@ -1,12 +1,13 @@
-import chromadb
-from chromadb.config import Settings
-from sentence_transformers import SentenceTransformer
 from fastapi import Request
 
 from app.core.config import settings
 
 class VectorStore:
     def __init__(self):
+        import chromadb
+        from chromadb.config import Settings
+        from sentence_transformers import SentenceTransformer
+
         self.client = chromadb.HttpClient(
             host=settings.CHROMA_HOST,
             port=settings.CHROMA_PORT,

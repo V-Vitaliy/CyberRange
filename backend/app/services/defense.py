@@ -30,7 +30,7 @@ async def process_defense_purchase(
     price = DEFENSE_PRICING[defense_type]
 
     # 2. Fetch the game session
-    game_session = await GameSessionRepository.get_by_id(db, session_id)
+    game_session = await GameSessionRepository.get_by_id(db, session_id, for_update=True)
 
     if not game_session:
          raise HTTPException(status_code=404, detail="Game session not found.")

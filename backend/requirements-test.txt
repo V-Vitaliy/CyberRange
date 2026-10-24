@@ -1,0 +1,21 @@
+# Service-free API/unit tests; no model weights, llama-cpp build or GPU stack.
+# Runtime imports used by these tests are also declared in requirements.txt.
+pytest
+pytest-asyncio
+httpx
+fastapi
+sqlalchemy[asyncio]
+asyncpg
+pydantic_settings
+PyJWT
+bcrypt
+redis
+langchain-core
+langchain-community
+langchain-groq
+langgraph
+aiofiles
+python-multipart
+pypdf
+nltk
+tiktoken

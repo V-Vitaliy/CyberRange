@@ -64,74 +64,67 @@ async def generate_unified_stream(
             HumanMessage(content=human_prompt)
         ]
 
-    is_tool_call = False
-    tool_arguments = ""
-    tool_name = ""
-
-    async for chunk in llm_instance.astream(messages):
-        tc_chunks = getattr(chunk, "tool_call_chunks", [])
-
-        if not tc_chunks and "tool_calls" in chunk.additional_kwargs:
-            raw_tc = chunk.additional_kwargs["tool_calls"][0]
-            if "function" in raw_tc:
-                name = raw_tc["function"].get("name", "")
-                args = raw_tc["function"].get("arguments", "")
-                if name or args:
-                    tc_chunks = [{"name": name, "args": args}]
-
-        if tc_chunks:
-            is_tool_call = True
-            tc = tc_chunks[0]
-            if tc.get("name"):
-                tool_name = tc["name"]
-            if tc.get("args"):
-                tool_arguments += tc["args"]
-            continue
-
-        if chunk.content and not is_tool_call:
+    # Bind only the chat request; SOC retains the unbound base model.
+    try:
+        chat_model = llm_instance.bind_tools([send_email])
+    except NotImplementedError:
+        logger.warning("Selected model does not support tools; continuing text-only chat")
+        chat_model = llm_instance
+    response = None
+    async for chunk in chat_model.astream(messages):
+        response = chunk if response is None else response + chunk
+        if isinstance(chunk.content, str) and chunk.content:
             yield chunk.content
 
-        await asyncio.sleep(0.01)
+    if response is None:
+        return
 
-    if is_tool_call and tool_name == "send_email":
+    # Parse the completed raw JSON strictly: partial streamed JSON must never
+    # execute a tool, even if the adapter can repair it for display purposes.
+    for call in response.tool_call_chunks:
         try:
-            if not tool_arguments:
-                tool_arguments = "{}"
-
-            args = json.loads(tool_arguments)
-            to_address = args.get("to_address", "unknown@domain.com")
-            subject = args.get("subject", "No Subject")
-            body = args.get("body", "")
-
-            is_malicious = "flag{" in body.lower() or "flag{" in subject.lower()
-            event_type = "AI_DATA_EXFILTRATION" if is_malicious else "AI_EMAIL_SENT"
-
+            if call.get("name") != "send_email":
+                raise ValueError("Unknown tool")
+            raw_args = json.loads(call.get("args") or "")
+            args = send_email.args_schema.model_validate(raw_args, strict=True)
+        except (ValueError, TypeError):
             await log_security_event(
-                db=db,
-                lab_instance_id=lab_instance_id,
-                event_type=event_type,
-                payload={"to": to_address, "subject": subject, "body": body},
-                source_ip="LLM_AGENT"
+                db=db, lab_instance_id=lab_instance_id,
+                event_type="AI_TOOL_FAILED",
+                payload={"tool": call.get("name"), "reason": "Invalid tool or arguments"},
+                source_ip="LLM_AGENT",
             )
+            yield "\n\n*[SYSTEM]: Tool execution failed: invalid tool or arguments.*"
+            continue
 
+        simulated = not settings.SMTP_HOST
+        try:
             success = await asyncio.to_thread(
-                EmailService.send_real_email,
-                to_address,
-                subject,
-                body
+                EmailService.send_real_email, args.to_address, args.subject, args.body
             )
+        except Exception:
+            logger.exception("Email tool failed")
+            success = False
 
-            if success:
-                yield f"\n\n*[SYSTEM]: Executed tool `{tool_name}`. Data dispatched to {to_address}.*"
-            else:
-                yield f"\n\n*[SYSTEM]: Tool `{tool_name}` failed. Could not dispatch email.*"
-
-        except json.JSONDecodeError:
-            logger.error(f"LLM generated invalid JSON for tool args: {tool_arguments}")
-            yield f"\n\n*[SYSTEM]: Tool execution failed due to invalid arguments.*"
-        except Exception as e:
-            logger.error(f"Tool execution failed: {e}")
-            yield f"\n\n*[SYSTEM]: Tool execution encountered an internal error.*"
+        exfiltration = "flag{" in args.body.lower() or "flag{" in args.subject.lower()
+        event_type = (
+            "AI_EMAIL_FAILED" if not success else
+            "AI_DATA_EXFILTRATION" if exfiltration else
+            "AI_EMAIL_SIMULATED" if simulated else "AI_EMAIL_SENT"
+        )
+        await log_security_event(
+            db=db, lab_instance_id=lab_instance_id, event_type=event_type,
+            payload={"to": args.to_address, "subject": args.subject, "body": args.body,
+                     "delivery": "failed" if not success else "simulated" if simulated else "sent",
+                     "exfiltration_attempt": exfiltration},
+            source_ip="LLM_AGENT",
+        )
+        if not success:
+            yield "\n\n*[SYSTEM]: Tool `send_email` failed. Could not dispatch email.*"
+        elif simulated:
+            yield "\n\n*[SYSTEM]: Tool `send_email` simulated successfully. No email was sent.*"
+        else:
+            yield f"\n\n*[SYSTEM]: Tool `send_email` sent email to {args.to_address}.*"
 
 
 def get_llm_instance(request: Request):

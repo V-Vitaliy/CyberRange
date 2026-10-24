@@ -1,5 +1,7 @@
 from contextlib import asynccontextmanager
 import asyncio
+import logging
+from contextlib import suppress
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -11,6 +13,7 @@ from app.api.routes_blue import router as blue_router
 from app.core.config import settings
 from app.core.llm_engine import init_groq,init_llm
 from app.services.soc_worker import run_soc_analyst_loop
+from app.agents.soc_agent import create_soc_graph
 
 # 2. Sub-application for Red Team Docs
 red_app = FastAPI(
@@ -33,7 +36,6 @@ blue_app.include_router(blue_router, prefix="")
 async def lifespan(app: FastAPI):
     queue_manager = LLMQueueManager()
     vector_store = VectorStore()
-    soc_task = asyncio.create_task(run_soc_analyst_loop())
 
     if settings.GROQ_API_KEY:
         llm_instance = init_groq()
@@ -52,8 +54,23 @@ async def lifespan(app: FastAPI):
     blue_app.state.queue_manager = queue_manager
     blue_app.state.vector_store = vector_store
 
-    yield
-    soc_task.cancel()
+    soc_task = None
+    try:
+        soc_graph = create_soc_graph(llm_instance)
+    except (NotImplementedError, ValueError, AttributeError):
+        logging.getLogger(__name__).exception(
+            "SOC structured output is unavailable for the selected model; logs remain pending"
+        )
+    else:
+        soc_task = asyncio.create_task(run_soc_analyst_loop(soc_graph, queue_manager))
+
+    try:
+        yield
+    finally:
+        if soc_task is not None:
+            soc_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await soc_task
 
 app = FastAPI(
     title="AI Security CyberRange API",

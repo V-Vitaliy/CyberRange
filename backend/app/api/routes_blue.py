@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
 from app.db.database import get_db
-from app.core.security import verify_password, create_access_token, get_current_user_secure
+from app.core.security import verify_password, create_access_token, get_blue_team_user, get_authorized_session
 from app.services.forensics import process_investigation
 from app.services.defense import process_defense_purchase
 from app.db.models import User
@@ -48,21 +48,27 @@ async def login_blue_team(login_data: LoginRequest, db: AsyncSession = Depends(g
     return {"access_token": access_token, "token_type": "bearer"}
 
 @router.get("/me", tags=["Blue Team - User"])
-async def get_my_profile(current_user: User = Depends(get_current_user_secure)):
-    """A protected endpoint for validation."""
+async def get_my_profile(
+    current_user: User = Depends(get_blue_team_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the authenticated profile and its laboratory's current session."""
+    session = await GameSessionRepository.get_by_lab_instance_id(db, current_user.lab_instance_id)
     return {
         "username": current_user.username,
         "role": current_user.role,
+        "session_id": str(session.id) if session else None,
         "message": "Welcome to the secure Blue Team zone."
     }
 
 @router.post("/defenses/buy", response_model=BuyDefenseResponse, tags=["Blue Team - Shop"])
 async def buy_defense(
     request_data: BuyDefenseRequest,
-    current_user: User = Depends(get_current_user_secure),
+    current_user: User = Depends(get_blue_team_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Allows Blue Team to spend their defense budget on security patches."""
+    await get_authorized_session(db, request_data.session_id, current_user.lab_instance_id)
     return await process_defense_purchase(
         db=db,
         session_id=request_data.session_id,
@@ -72,10 +78,11 @@ async def buy_defense(
 @router.post("/investigate", response_model=InvestigateResponse, tags=["Blue Team - Forensics"])
 async def investigate_log(
     req: InvestigateRequest,
-    current_user: User = Depends(get_current_user_secure),
+    current_user: User = Depends(get_blue_team_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Processes a log investigation and awards points if the verdict is correct."""
+    await get_authorized_session(db, req.session_id, current_user.lab_instance_id)
     return await process_investigation(
         db=db,
         log_id=req.log_id,
@@ -87,11 +94,11 @@ async def investigate_log(
 @router.get("/dashboard", response_model=DashboardStatsResponse, tags=["Blue Team - Dashboard"])
 async def get_dashboard_stats(
     session_id: str = Query(..., description="Current game session ID"),
-    current_user: User = Depends(get_current_user_secure),
+    current_user: User = Depends(get_blue_team_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Aggregates metrics for the Blue Team React Dashboard (KPI cards)."""
-    game_session = await GameSessionRepository.get_by_id(db, session_id)
+    game_session = await get_authorized_session(db, session_id, current_user.lab_instance_id)
 
     if not game_session:
         raise HTTPException(status_code=404, detail="Game session not found.")
@@ -114,12 +121,12 @@ async def get_dashboard_stats(
 @router.get("/logs", response_model=List[AuditLogEntry], tags=["Blue Team - SIEM"])
 async def get_audit_logs(
     session_id: str = Query(..., description="Current game session ID"),
-    limit: int = Query(50, description="Max number of logs to fetch"),
-    current_user: User = Depends(get_current_user_secure),
+    limit: int = Query(50, ge=1, le=500, description="Max number of logs to fetch"),
+    current_user: User = Depends(get_blue_team_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Fetches raw SIEM logs for the investigation table."""
-    game_session = await GameSessionRepository.get_by_id(db, session_id)
+    game_session = await get_authorized_session(db, session_id, current_user.lab_instance_id)
     if not game_session:
         raise HTTPException(status_code=404, detail="Game session not found.")
 

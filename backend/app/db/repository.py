@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import desc, func
 from sqlalchemy.orm.attributes import flag_modified
+from fastapi import HTTPException
 
 from app.db.models import User, GameSession, SecurityAuditLog, ChatThread, CtfFlag, CtfSubmission
 
@@ -33,8 +34,11 @@ class GameSessionRepository:
     """Handles all database operations for Game Sessions."""
 
     @staticmethod
-    async def get_by_id(db: AsyncSession, session_id: str | uuid.UUID) -> Optional[GameSession]:
-        result = await db.execute(select(GameSession).where(GameSession.id == ensure_uuid(session_id)))
+    async def get_by_id(db: AsyncSession, session_id: str | uuid.UUID, *, for_update=False) -> Optional[GameSession]:
+        stmt = select(GameSession).where(GameSession.id == ensure_uuid(session_id))
+        if for_update:
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
+        result = await db.execute(stmt)
         return result.scalars().first()
 
     @staticmethod
@@ -74,6 +78,8 @@ class ChatRepository:
         thread = result.scalars().first()
 
         if thread:
+            if thread.user_id != ensure_uuid(user_id) or thread.session_id != ensure_uuid(session_id):
+                raise HTTPException(status_code=404, detail="Chat thread not found")
             return thread
 
         new_thread = ChatThread(
@@ -121,8 +127,11 @@ class AuditLogRepository:
     """Handles all database operations for SIEM Logs (Blue Team UI)."""
 
     @staticmethod
-    async def get_by_id(db: AsyncSession, log_id: uuid.UUID | str):
-        result = await db.execute(select(SecurityAuditLog).where(SecurityAuditLog.id == ensure_uuid(log_id)))
+    async def get_by_id(db: AsyncSession, log_id: uuid.UUID | str, *, for_update=False):
+        stmt = select(SecurityAuditLog).where(SecurityAuditLog.id == ensure_uuid(log_id))
+        if for_update:
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
+        result = await db.execute(stmt)
         return result.scalars().first()
 
     @staticmethod

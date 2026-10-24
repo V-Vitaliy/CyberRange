@@ -25,7 +25,8 @@ class LLMQueueManager:
             )
 
         try:
-            await asyncio.wait_for(self.gpu_lock.acquire(), timeout=self.timeout_seconds)
+            async with asyncio.timeout(self.timeout_seconds):
+                await self.gpu_lock.acquire()
         except asyncio.TimeoutError:
             self.queue.get_nowait()
             self.queue.task_done()
@@ -33,6 +34,11 @@ class LLMQueueManager:
                 status_code=status.HTTP_504_GATEWAY_TIMEOUT,
                 detail="Request timed out while waiting for GPU resources."
             )
+
+        except asyncio.CancelledError:
+            self.queue.get_nowait()
+            self.queue.task_done()
+            raise
 
     def release_turn(self):
         self.gpu_lock.release()
