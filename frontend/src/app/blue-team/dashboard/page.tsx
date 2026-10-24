@@ -27,9 +27,9 @@ function DashboardContent() {
   const selectedEvent = logs.find(event => event.id === selectedEventId) || null;
   const [investigateId, setInvestigateId] = useState('');
 
-  // МАППИНГ: Исправляем несоответствие названий между фронтендом и бэкендом
+  // Map frontend defense names to backend names.
   const handleBuyDefense = (id: string) => {
-    // В базе и defense.py защита называется "system_prompt", а в UI "prompt_hardening"
+    // The database and defense.py use "system_prompt"; the UI uses "prompt_hardening".
     const backendId = id === 'prompt_hardening' ? 'system_prompt' : id;
     buyDefense(backendId);
   };
@@ -102,12 +102,12 @@ function DashboardContent() {
             <h3 className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest flex items-center gap-2 mb-2">
               <Activity size={14} className="text-indigo-500" /> {t.chartTitle}
             </h3>
-            {/* УБРАЛИ ФИЛЬТР: Теперь передаем сырые логи (logs) */}
+            {/* Pass unfiltered audit logs. */}
             <ActivityChart data={logs} />
           </section>
 
           <div className="flex-1 flex gap-6 overflow-hidden pb-4">
-            {/* УБРАЛИ ФИЛЬТР: Теперь передаем сырые логи (logs) */}
+            {/* Pass unfiltered audit logs. */}
             <EventTable
               events={logs}
               selectedEventId={selectedEvent?.id}

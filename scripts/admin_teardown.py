@@ -1,2 +1,2 @@
 import argparse
-# Сброс БД
+# Database reset

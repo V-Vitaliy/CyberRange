@@ -27,23 +27,23 @@ class Options:
         if not isinstance(self.lab_id, UUID) or (
             self.team_id is not None and not isinstance(self.team_id, UUID)
         ):
-            raise SetupError("lab_id и team_id должны быть UUID.")
+            raise SetupError("lab_id and team_id must be UUIDs.")
         if any(not name or name != name.strip()
                for name in (self.red_username, self.blue_username)):
-            raise SetupError("Имена не могут быть пустыми или с пробелами по краям.")
+            raise SetupError("Usernames must not be empty or have leading or trailing whitespace.")
         if self.red_username == self.blue_username:
-            raise SetupError("Имена red/blue должны различаться.")
+            raise SetupError("Red and blue usernames must differ.")
         if self.budget < 0:
-            raise SetupError("Начальный бюджет не может быть отрицательным.")
+            raise SetupError("The initial budget must not be negative.")
 
 
 def read_password(role):
     key = f"{role.upper()}_PASSWORD"
     password = os.environ.get(key)
     if password is None and sys.stdin.isatty():
-        password = getpass.getpass(f"Пароль {role}: ")
+        password = getpass.getpass(f"Password for {role}: ")
     if not password:
-        raise SetupError(f"Задайте {key} в окружении или используйте скрытый ввод.")
+        raise SetupError(f"Set {key} in the environment or enter it at the hidden prompt.")
     return password  # Preserve whitespace exactly, as the login does.
 
 
@@ -55,21 +55,21 @@ async def seed(store, options, password_lookup, hash_password):
     for name, role in roles:
         user = await store.user(name)
         if user is not None and (user.role != role or user.lab_instance_id != options.lab_id):
-            raise SetupError("Имя уже занято пользователем другой роли или лаборатории.")
+            raise SetupError("The username belongs to a user with a different role or lab.")
         users.append(user)
     sessions = await store.sessions(options.lab_id)
     if len(sessions) > 1:
-        raise SetupError("У лаборатории несколько сессий; устраните неоднозначность вручную.")
+        raise SetupError("The lab has multiple sessions; resolve the ambiguity manually.")
     session = sessions[0] if sessions else None
     if session is not None and options.team_id is not None and session.team_id != options.team_id:
-        raise SetupError("--team-id конфликтует с существующей сессией.")
+        raise SetupError("--team-id conflicts with the existing session.")
     # Resolve and hash both secrets before writing any rows.
     hashes = {}
     for user, (_, role) in zip(users, roles):
         if user is None:
             password = password_lookup(role)
             if not password:
-                raise SetupError("Пароль нового пользователя не может быть пустым.")
+                raise SetupError("A new user password must not be empty.")
             hashes[role] = hash_password(password)
     created = {"red_team": users[0] is None, "blue_team": users[1] is None,
                "session": session is None}
@@ -150,7 +150,7 @@ async def run_setup(options):
 
     url = make_url(settings.DATABASE_URL)
     if url.drivername != "postgresql+asyncpg":
-        raise SetupError("DATABASE_URL должен использовать postgresql+asyncpg.")
+        raise SetupError("DATABASE_URL must use postgresql+asyncpg.")
     engine = create_async_engine(url, echo=False, hide_parameters=True,
                                  connect_args={"timeout": 10})
     try:
@@ -163,16 +163,16 @@ async def run_setup(options):
 
 
 def parser():
-    result = argparse.ArgumentParser(description="Подготовка одной учебной лаборатории CyberRange.")
+    result = argparse.ArgumentParser(description="Provision one CyberRange learning lab.")
     result.add_argument("--lab-id", required=True, type=UUID,
-                        help="Стабильный UUID лаборатории; повторно используйте тот же UUID.")
+                        help="Stable lab UUID; reuse the same UUID on subsequent runs.")
     result.add_argument("--team-id", type=UUID,
-                        help="При создании: UUID команды, по умолчанию ID red-пользователя.")
+                        help="For creation: team UUID; defaults to the red user ID.")
     result.add_argument("--red-username", default="red_student")
     result.add_argument("--blue-username", default="blue_analyst")
-    result.add_argument("--budget", type=int, default=5, help="Только для новой сессии.")
+    result.add_argument("--budget", type=int, default=5, help="Applies only to a new session.")
     result.add_argument("--is-solo", action=argparse.BooleanOptionalAction, default=True,
-                        help="Auto-SOC для новой сессии; существующая настройка сохраняется.")
+                        help="Auto-SOC for a new session; preserves the existing setting.")
     return result
 
 
@@ -184,16 +184,16 @@ def main(argv=None):
         print(f"admin_setup: {exc}", file=sys.stderr)
         return 1
     except (EOFError, KeyboardInterrupt):
-        print("admin_setup: ввод отменён; подготовка не завершена.", file=sys.stderr)
+        print("admin_setup: input canceled; setup was not completed.", file=sys.stderr)
         return 1
     except ImportError:
-        print("admin_setup: установите backend/requirements-groq.txt в Python-окружение.", file=sys.stderr)
+        print("admin_setup: install backend/requirements-groq.txt in the Python environment.", file=sys.stderr)
         return 1
     except Exception:
         # DB exceptions can contain SQL parameters, hashes and credentials.
-        print("admin_setup: подготовка не подтверждена. Проверьте DATABASE_URL, доступность "
-              "PostgreSQL, права CONNECT/USAGE/CREATE и записи в таблицы, совместимость "
-              "схемы. После восстановления повторите ту же команду; секреты скрыты.", file=sys.stderr)
+        print("admin_setup: setup could not be confirmed. Check DATABASE_URL, PostgreSQL "
+              "availability, CONNECT/USAGE/CREATE and table write permissions, and schema "
+              "compatibility. After recovery, repeat the same command; secrets are hidden.", file=sys.stderr)
         return 1
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
