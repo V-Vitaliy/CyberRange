@@ -1,10 +1,10 @@
-# Локальный запуск с Groq
+# Running locally with Groq
 
-CyberRange — учебный проект с намеренными уязвимостями. Этот документ описывает будущий ручной запуск существующего приложения: приведённые команды не выполняются автоматически. Подготовка таблиц, пользователей и сессии реализована в `scripts/admin_setup.py`; учебные документы/CTF и изолированный SQLi остаются отдельными задачами.
+CyberRange is a learning project with intentional vulnerabilities. This document describes how to run the existing application manually; the commands are not executed automatically. Table, user, and session setup is implemented in `scripts/admin_setup.py`; learning documents/CTF and isolated SQLi remain separate tasks.
 
-## 1. Окружение
+## 1. Environment
 
-Команды выполняются из корня проекта. Используйте Python 3.11 или новее. Для frontend нужен Node.js, совместимый с существующим Next.js; проверки этого изменения выполнены на Node.js 24.
+Run commands from the repository root. Use Python 3.11 or later. The frontend requires a Node.js version compatible with the existing Next.js version; the frontend checks for these instructions were run on Node.js 24.
 
 ```bash
 python3 -m venv .venv
@@ -12,19 +12,19 @@ source .venv/bin/activate
 python -m pip install -r backend/requirements-groq.txt
 ```
 
-`requirements-groq.txt` содержит прежние зависимости приложения без `llama-cpp-python`. Полный `requirements.txt` включает этот список и локальный llama-cpp. Это позволяет начать с Groq без компиляции локального LLM. Embeddings по-прежнему вычисляются существующим SentenceTransformer на CPU; Groq заменяет только генерацию текста.
+`requirements-groq.txt` contains the existing application dependencies without `llama-cpp-python`. The full `requirements.txt` includes this list and local llama-cpp support. This lets you start with Groq without compiling a local LLM. Embeddings are still computed by the existing SentenceTransformer on CPU; Groq replaces only text generation.
 
-Если `.env` ещё не существует, скопируйте `.env.example` в `.env`. Не перезаписывайте собственные настройки. Заполните:
+If `.env` does not exist yet, copy `.env.example` to `.env`. Do not overwrite your own settings. Configure:
 
-- `GROQ_API_KEY` — свой ключ, только в локальном `.env`.
-- `JWT_SECRET` — собственный случайный секрет.
-- `DATABASE_URL`, `REDIS_URL` — локальные подключения, согласованные с подготовкой БД.
+- `GROQ_API_KEY`: your key, stored only in the local `.env`.
+- `JWT_SECRET`: your own random secret.
+- `DATABASE_URL`, `REDIS_URL`: local connections consistent with your database setup.
 - `CHROMA_HOST=localhost`, `CHROMA_PORT=8000`.
-- `SMTP_HOST=` — оставьте пустым для первого запуска. Инструмент письма выполнит симуляцию и явно сообщит, что письмо не отправлялось.
+- `SMTP_HOST=`: leave empty for the first run. The email tool will simulate delivery and explicitly report that no email was sent.
 
-## 2. Сервисы и данные обработки документов
+## 2. Services and document processing data
 
-Существующие Compose-файлы:
+Existing Compose files:
 
 ```bash
 docker compose -f docker-compose.state.yml up -d
@@ -32,48 +32,48 @@ docker compose -f docker-compose.compute.yml up -d chromadb
 python -m nltk.downloader punkt_tab
 ```
 
-Порты: PostgreSQL 5432, Redis 6379, Chroma 8000, API 8001, frontend 3000. MinIO не требуется текущему пути загрузки PDF: файлы сохраняются локально. Его Compose-сервис сохранён.
+Ports: PostgreSQL 5432, Redis 6379, Chroma 8000, API 8001, frontend 3000. The current PDF upload flow does not require MinIO: files are stored locally. Its Compose service is retained.
 
-При первом использовании SentenceTransformer загружает `all-mpnet-base-v2`, tiktoken — данные `cl100k_base`; приобретённый reranker загружает `cross-encoder/ms-marco-MiniLM-L-6-v2`. Для этого нужна сеть либо заранее подготовленный кеш. GGUF для Groq не нужен.
+On first use, SentenceTransformer downloads `all-mpnet-base-v2`, and tiktoken downloads `cl100k_base` data; the purchased reranker downloads `cross-encoder/ms-marco-MiniLM-L-6-v2`. This requires network access or a populated cache. Groq does not require GGUF.
 
-### Подготовка таблиц и начальных записей
+### Preparing tables and initial records
 
-Для самого seed нужны только запущенная PostgreSQL и backend-зависимости; Redis, Chroma, Groq и frontend ему не нужны. PostgreSQL-база должна уже существовать (при первом запуске её создаёт образ PostgreSQL из Compose). Скрипт не запускает контейнеры и не создаёт `.env`.
+Seeding requires only a running PostgreSQL instance and backend dependencies; it does not require Redis, Chroma, Groq, or the frontend. The PostgreSQL database must already exist (the PostgreSQL Compose image creates it on first startup). The script does not start containers or create `.env`.
 
-Из корня проекта, в подготовленном Python-окружении:
+From the repository root, in the prepared Python environment:
 
 ```bash
 python scripts/admin_setup.py --lab-id 65319dde-b9fd-4aa2-9988-1467f46100a1
 ```
 
-Это пример стабильного UUID вашей лаборатории. Для другой лаборатории выберите другой UUID и другие имена пользователей. При повторном запуске используйте **тот же** UUID и имена; UUID можно один раз получить командой `python -c 'import uuid; print(uuid.uuid4())'`.
+This is an example of a stable lab UUID. For another lab, choose a different UUID and different usernames. On subsequent runs, use **the same** UUID and usernames; generate a UUID once with `python -c 'import uuid; print(uuid.uuid4())'`.
 
-- `DATABASE_URL` берётся из существующих настроек backend: переменная окружения имеет приоритет над корневым `.env`, затем используются defaults приложения. Формат: `postgresql+asyncpg://USER:PASSWORD@HOST:5432/DB`; специальные символы credentials в URL требуют percent-encoding.
-- Новые пароли запрашиваются скрытым вводом. Для неинтерактивного запуска задайте `RED_TEAM_PASSWORD` и `BLUE_TEAM_PASSWORD` **в окружении процесса**. Эти две переменные скрипт не читает из `.env`. Пароли не передаются аргументами CLI, не печатаются и сохраняются через существующий `get_password_hash`; пробелы в них значимы. Пароли уже существующих пользователей не запрашиваются и не меняются.
-- Имена по умолчанию: `red_student` и `blue_analyst`. Можно задать `--red-username` и `--blue-username`.
-- Для новой сессии: `--budget 5`, `--is-solo` по умолчанию включён; `--no-is-solo` выключает Auto-SOC. Повторная подготовка сохраняет уже установленный бюджет, защиты, prompt и `is_solo`. Сам seed SOC не запускает; он работает после запуска API с поддерживающей его моделью.
-- `lab_instance_id` общий для двух пользователей и сессии; отдельной таблицы лабораторий нет. `session_id` — UUID игровой сессии. `team_id` новой сессии по умолчанию равен UUID red-пользователя; его можно явно задать `--team-id`. У `User` поля `team_id` нет. Существующая сессия сохраняет свою команду, а конфликт явного `--team-id` вызывает отказ.
-- Вывод — JSON с ID лаборатории, сессии, команды и пользователей и признаками `created`. Dashboard получает сессию после login через `/api/blue/me`; Red Team получает токен с подписанным `lab_scope` через существующий `/api/red/login`.
+- `DATABASE_URL` comes from the existing backend settings: the environment variable takes precedence over the root `.env`, followed by application defaults. Format: `postgresql+asyncpg://USER:PASSWORD@HOST:5432/DB`; special characters in URL credentials require percent-encoding.
+- New passwords are requested using hidden input. For noninteractive runs, set `RED_TEAM_PASSWORD` and `BLUE_TEAM_PASSWORD` **in the process environment**. The script does not read these two variables from `.env`. Passwords are not passed as CLI arguments or printed; they are stored using the existing `get_password_hash`. Whitespace is significant. Existing users' passwords are neither requested nor changed.
+- Default usernames: `red_student` and `blue_analyst`. Override them with `--red-username` and `--blue-username`.
+- For a new session: `--budget 5`; `--is-solo` is enabled by default, and `--no-is-solo` disables Auto-SOC. Repeated setup preserves the existing budget, defenses, prompt, and `is_solo`. Seeding itself does not start SOC; it runs after API startup with a model that supports it.
+- Both users and the session share `lab_instance_id`; there is no separate lab table. `session_id` is the game session UUID. A new session's `team_id` defaults to the red user's UUID; set it explicitly with `--team-id`. `User` has no `team_id` field. An existing session retains its team; a conflicting explicit `--team-id` is rejected.
+- Output is JSON containing lab, session, team, and user IDs, plus `created` indicators. After login, the dashboard gets its session from `/api/blue/me`; Red Team receives a token with a signed `lab_scope` through the existing `/api/red/login`.
 
-Повторите ту же команду для проверки идемпотентности: она сохраняет пароли, UUID, бюджет, защиты и результаты. Недостающий пользователь может быть добавлен в ту же лабораторию. Занятое имя с другой ролью/лабораторией, совпавшие имена red/blue, несколько сессий в одной лаборатории или конфликт команды приводят к отказу без перепривязки записей.
+Repeat the same command to check idempotency: passwords, UUIDs, budget, defenses, and progress are preserved. A missing user can be added to the same lab. A username taken by another role/lab, identical red/blue usernames, multiple sessions in one lab, or a team conflict causes failure without reassigning records.
 
-Скрипт использует `Base.metadata.create_all(checkfirst=True)` и одну транзакцию для DDL и seed; он **не мигрирует** существующую схему, не удаляет таблицы и не меняет данные расследований/CTF. PostgreSQL advisory lock сериализует параллельные запуски этого скрипта, включая создание таблиц. Обычные запросы приложения эта блокировка не ограничивает. Таймаут подключения — 10 секунд, ожидания блокировки — 10 секунд, SQL-команды — 30 секунд.
+The script uses `Base.metadata.create_all(checkfirst=True)` and one transaction for DDL and seeding. It **does not migrate** an existing schema, delete tables, or change investigation/CTF data. A PostgreSQL advisory lock serializes concurrent runs of this script, including table creation. It does not restrict normal application requests. Timeouts: connection 10 seconds, lock wait 10 seconds, SQL statement 30 seconds.
 
-Подключению нужны `CONNECT` к базе, `USAGE` и `CREATE` в целевой схеме (обычно `public`), права чтения/вставки в таблицы `users`/`game_sessions`; для создания отсутствующих таблиц нужны соответствующие права на используемые типы и ссылочные таблицы. Для локальной чистой БД роль-владелец из Compose достаточна. Это управляющее подключение, оно не предназначено для будущего SQLi. При несовместимой существующей схеме скрипт завершится ошибкой: исправление схемы выполняется отдельно, автоматического reset нет.
+The connection requires `CONNECT` on the database, `USAGE` and `CREATE` on the target schema (usually `public`), and read/insert permissions on `users`/`game_sessions`. Creating missing tables also requires appropriate permissions on the types and referenced tables. For a clean local database, the owner role from Compose is sufficient. This is an administrative connection, not the connection for future SQLi exercises. An incompatible existing schema causes failure: schema repair is separate, with no automatic reset.
 
-При ошибке выводится краткое сообщение без DSN, паролей и SQL-параметров, exit code ненулевой. При потере соединения во время commit его результат может быть неизвестен: после восстановления повторите команду с теми же параметрами. Учебные документы и флаги этот скрипт пока не загружает.
+Failures produce a short message without the DSN, passwords, or SQL parameters, and a nonzero exit code. If the connection is lost during commit, the outcome may be unknown: after recovery, repeat the command with the same parameters. This script does not yet load learning documents or flags.
 
-## 3. Запуск API и dashboard
+## 3. Starting the API and dashboard
 
-В первом терминале, из корня проекта с активным Python-окружением:
+In the first terminal, from the repository root with the Python environment activated:
 
 ```bash
 python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8001
 ```
 
-Рабочий каталог влияет на размещение загруженных файлов. Используйте один и тот же каталог при последующих запусках.
+The working directory affects where uploaded files are stored. Use the same directory on subsequent runs.
 
-Во втором терминале:
+In a second terminal:
 
 ```bash
 cd frontend
@@ -81,26 +81,26 @@ npm ci
 npm run dev
 ```
 
-По умолчанию dashboard обращается к `http://127.0.0.1:8001/api/blue`. Если адрес отличается, задайте `NEXT_PUBLIC_BLUE_API_URL` в `frontend/.env.local` по образцу `frontend/.env.example` и перезапустите Next.js. Для production-сборки этот адрес задаётся перед `npm run build`.
+By default, the dashboard calls `http://127.0.0.1:8001/api/blue`. For a different address, set `NEXT_PUBLIC_BLUE_API_URL` in `frontend/.env.local` using `frontend/.env.example` as a guide, then restart Next.js. For a production build, set this address before `npm run build`.
 
 - Dashboard: `http://localhost:3000/blue-team/dashboard`.
 - Red Team API/Swagger: `http://127.0.0.1:8001/api/red/docs`.
 - Blue Team API/Swagger: `http://127.0.0.1:8001/api/blue/docs`.
-- Базовый health: `http://127.0.0.1:8001/api/health` — сам по себе не проверяет исправность всех сервисов.
+- Basic health: `http://127.0.0.1:8001/api/health`; this alone does not establish that all services work.
 
-После входа dashboard получает ID сессии из `/api/blue/me`. Параметр `?session_id=...` по-прежнему поддерживается; backend проверяет принадлежность сессии. Если сессии ещё нет, dashboard покажет сообщение о необходимости подготовки БД.
+After login, the dashboard gets the session ID from `/api/blue/me`. The `?session_id=...` parameter is still supported; the backend checks session ownership. If no session exists yet, the dashboard displays a message asking for database setup.
 
-Red Team работает через API. Для защищённых запросов передавайте заголовок `Authorization: Bearer <access_token>`, полученный при login. Отдельного браузерного Red Team чата пока нет. Старые токены без `lab_scope` требуют повторного входа.
+Red Team uses the API. For protected requests, pass `Authorization: Bearer <access_token>` using the token returned by login. There is no separate browser-based Red Team chat yet. Old tokens without `lab_scope` require a new login.
 
-## 4. Проверки до интеграционного запуска
+## 4. Checks before integration startup
 
-Изолированные unit-тесты seed работают на стандартной библиотеке, без `.env`, сети и установленных backend-зависимостей:
+Isolated seed unit tests use the standard library and need no `.env`, network, or installed backend dependencies:
 
 ```bash
 python3 -m unittest discover -s backend/tests -p test_admin_setup.py -v
 ```
 
-Они проверяют логику на заглушках хранилища/транзакции/хеширования. Настоящие PostgreSQL, bcrypt, SQLAlchemy и login-маршруты этим набором не проверяются. Их проверку выполните при ручном интеграционном запуске. Остальной набор тестов требует существующего `requirements-test.txt`:
+They check logic using storage, transaction, and hashing doubles. This suite does not test real PostgreSQL, bcrypt, SQLAlchemy, or login routes. A separate opt-in integration check covers those; commands and results on PostgreSQL 15.19 are in [ISSUE_58_VALIDATION.md](ISSUE_58_VALIDATION.md). The remaining tests require the existing `requirements-test.txt`:
 
 ```bash
 python -m pip install -r backend/requirements-test.txt
@@ -111,16 +111,16 @@ npx tsc --noEmit --incremental false
 npm run build -- --webpack
 ```
 
-Команда Node-тестов использует встроенную поддержку TypeScript в Node.js 24 и не требует нового тестового пакета. Backend-тесты не отправляют настоящие письма и не вызывают облачную модель. Они проверяют реальные потоковые структуры LangChain и формирование схемы инструмента реальным адаптером Groq, но ответы модели и отправка писем подменены.
+The Node test command uses built-in TypeScript support in Node.js 24 and requires no new test package. Backend tests do not send real email or call a cloud model. They check real LangChain streaming structures and tool schema generation through the real Groq adapter, while model responses and email delivery are mocked.
 
-## 5. Проверка после завершения задач по БД/данным
+## 5. Checks after database/data tasks are complete
 
-1. Войти Blue Team и убедиться, что dashboard получил настоящую сессию и бюджет.
-2. Войти Red Team, задать вопрос через `/api/red/chat/ask` с реальными `session_id` и новым UUID `thread_id`. Проверить SSE-ответ и событие в SIEM.
-3. Проверить вопрос по публичному документу своей лаборатории.
-4. Запросить тестовое письмо на адрес в домене `.invalid`, оставляя `SMTP_HOST` пустым. Проверить сообщение о симуляции и событие `AI_EMAIL_SIMULATED` с `delivery=simulated`. Учебная утечка флага остаётся событием `AI_DATA_EXFILTRATION`, также с пометкой доставки.
-5. Проверить ручное расследование безопасного и вредоносного события. Auto-SOC в solo-сессии может расследовать событие раньше пользователя; API должен корректно сообщить об этом.
-6. Купить защиту и проверить списание бюджета, состояние кнопки и соответствующее поведение API. В частности, JWT-подмена роли должна работать только до включения защиты.
-7. Проверить, что сбой Groq оставляет событие нерасследованным, а dashboard показывает ошибки API, включая истечение токена.
+1. Log in as Blue Team and confirm the dashboard receives the real session and budget.
+2. Log in as Red Team and ask a question through `/api/red/chat/ask` using the real `session_id` and a new `thread_id` UUID. Check the SSE response and SIEM event.
+3. Ask a question about a public document in your lab.
+4. Request a test email to an address in the `.invalid` domain, leaving `SMTP_HOST` empty. Check the simulation message and `AI_EMAIL_SIMULATED` event with `delivery=simulated`. An educational flag leak remains an `AI_DATA_EXFILTRATION` event, also marked with the delivery mode.
+5. Check manual investigation of benign and malicious events. Auto-SOC in a solo session may investigate an event before the user; the API should report this correctly.
+6. Purchase a defense and check budget deduction, button state, and the corresponding API behavior. In particular, JWT role forgery should work only before the defense is enabled.
+7. Confirm that a Groq failure leaves the event uninvestigated and that the dashboard displays API errors, including token expiry.
 
-Полный сценарий с реальными сервисами ещё не подтверждён. Подготовку БД нужно проверить вручную на отдельной тестовой базе; учебные данные и SQLi/CTF ещё не готовы. В рамках реализации seed контейнеры, БД и `.env` не создавались.
+The full scenario with real services has not yet been confirmed. Database setup and login were checked against a separate test PostgreSQL database for Issue #58; that check did not run the full API lifecycle. Learning data and SQLi/CTF are not ready yet. Containers, the database, and `.env` were not created as part of the seed implementation.
