@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     #Postgres
     DATABASE_URL: str = "postgresql+asyncpg://cyberadmin:cyberpassword123@127.0.0.1:5432/cyberrange"
 
+    # Explicit local JSON mapping {lab UUID: restricted PostgreSQL URL}.
+    # Empty means history SQLi is unavailable; never fall back to DATABASE_URL.
+    SQLI_CONNECTIONS_FILE: str = ""
+
     JWT_SECRET: str = "super-secret-blue-team-key"
     JWT_ALGORITHM: str = "HS256"
 

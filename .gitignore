@@ -136,6 +136,10 @@ celerybeat.pid
 
 # Environments
 .env
+.local-sqli59/
+# Local agent instructions and previous task report must not be published.
+/AGENTS.md
+/docs/tasks/ISSUE_58_VALIDATION.md
 .envrc
 .venv
 env/
