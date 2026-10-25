@@ -8,7 +8,7 @@ import pytest_asyncio
 
 from app.core.security import get_current_user_secure
 from app.db.database import get_db
-from app.db.repository import ChatRepository, GameSessionRepository
+from app.db.repository import GameSessionRepository
 from app.main import app, blue_app
 
 
@@ -86,14 +86,3 @@ async def test_blue_reads_do_not_expose_another_lab(client, monkeypatch, path):
     finally:
         blue_app.dependency_overrides.clear()
     assert response.status_code == 404
-
-
-@pytest.mark.xfail(
-    not hasattr(ChatRepository, "search_chat_history_vulnerable"),
-    reason="SQLi repository implementation is missing; safe lab isolation needs a separate decision",
-    strict=True,
-)
-async def test_sqli_repository_scenario_is_available():
-    # Keep the known missing scenario visible rather than accepting AttributeError
-    # as proof that a SQL injection reached the database.
-    assert hasattr(ChatRepository, "search_chat_history_vulnerable")

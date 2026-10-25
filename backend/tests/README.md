@@ -7,8 +7,9 @@
 
 The default tests use external service doubles: PostgreSQL, Redis, Chroma, LLM,
 and SMTP do not need to run. They do not establish compatibility with real
-services. The SQLi check is marked `xfail` while the repository search method
-is missing.
+services. SQLi API tests check awaited search, authorization, error events and
+recovery using doubles; configuration tests verify no connection is opened for
+missing, privileged, mismatched or malformed reader configuration.
 
 From the repository root, in the activated virtual environment:
 
@@ -39,5 +40,27 @@ records for inspection, and does not perform reset/teardown. Without both
 `CYBERRANGE_SETUP_TEST_DATABASE_URL` and `CYBERRANGE_SETUP_TEST_DATABASE_NAME`,
 it is skipped. `.env` alone does not authorize this run.
 
-Commands, limitations, and real integration results are documented in
-[ISSUE_58_VALIDATION.md](../../ISSUE_58_VALIDATION.md).
+With both variables explicitly set, run:
+
+```bash
+.venv/bin/python backend/tests/integration/test_admin_setup_postgres.py -v
+```
+
+The [integration test](integration/test_admin_setup_postgres.py) checks real
+setup, login, preservation and transaction rollback without application lifespan.
+
+## Separate PostgreSQL SQLi check
+
+`integration/test_sqli_isolation_postgres.py` requires both
+`CYBERRANGE_SQLI_TEST_DATABASE_URL` and `CYBERRANGE_SQLI_TEST_DATABASE_NAME`,
+with an explicitly designated test database. Run it separately:
+
+```bash
+.venv/bin/python backend/tests/integration/test_sqli_isolation_postgres.py -v
+```
+
+It retains two new synthetic labs and their roles/views, and tests actual ACLs,
+intentional injection, foreign-lab rejection, error recovery and persisted SIEM
+events through the mounted HTTP route and real auth. It does not start application
+lifespan, Redis, Chroma, LLM or a network HTTP server. See
+[ISSUE_59_ISOLATION.md](../../docs/tasks/ISSUE_59_ISOLATION.md) for results and reproduction.

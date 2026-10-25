@@ -51,6 +51,12 @@ class ChatRepository:
     """Handles all database operations for Chat Threads (Red Team UI)."""
 
     @staticmethod
+    async def search_chat_history_vulnerable(lab_id, session_id, query):
+        # Never accept the control-plane AsyncSession for injectable SQL.
+        from app.db.sqli_search import search_history
+        return await search_history(lab_id, session_id, query)
+
+    @staticmethod
     async def get_threads_by_user_and_session(
         db: AsyncSession, user_id: str | uuid.UUID, session_id: str | uuid.UUID
     ) -> List[ChatThread]:
