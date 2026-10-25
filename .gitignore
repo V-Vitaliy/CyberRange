@@ -137,9 +137,11 @@ celerybeat.pid
 # Environments
 .env
 .local-sqli59/
-# Local agent instructions and previous task report must not be published.
+# Local agent instructions and working documentation
 /AGENTS.md
-/docs/tasks/ISSUE_58_VALIDATION.md
+/CLAUDE.md
+/STABILIZATION.md
+/docs/
 .envrc
 .venv
 env/
@@ -172,12 +174,8 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
-# PyCharm
-#  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
-#  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
-#  and can be added to the global gitignore or merged into this file.  For a more nuclear
-#  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#.idea/
+# PyCharm / JetBrains local project settings
+.idea/
 
 # Abstra
 # Abstra is an AI-powered process automation framework.
