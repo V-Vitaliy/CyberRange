@@ -27,6 +27,8 @@ from app.core.llm_engine import get_llm_instance
 from app.db.repository import UserRepository
 
 from app.db.repository import ChatRepository
+from app.db.sqli_isolation import IsolationError
+from app.db.sqli_search import HistoryQueryError
 
 router = APIRouter()
 
@@ -130,15 +132,15 @@ async def search_chat_history(
 
 
     try:
-        results, raw_query = ChatRepository.search_chat_history_vulnerable(db, session_id, q)
+        results, raw_query = await ChatRepository.search_chat_history_vulnerable(lab_id, session_id, q)
         return {"results": results}
-    except Exception as e:
-        # Log the exact SQL error (Blue Team can see the syntax error caused by the injection)
+    except (HistoryQueryError, IsolationError) as e:
+        # Search owns a separate transaction; this session remains usable for SIEM.
         await log_security_event(
             db=db, lab_instance_id=lab_id, event_type="SQL_ERROR",
             payload={"error": str(e), "failed_query": q}, source_ip=request.client.host
         )
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=503 if isinstance(e, IsolationError) else 400, detail=str(e))
 
 @router.post("/upload", tags=["Red Team"])
 async def upload_document(

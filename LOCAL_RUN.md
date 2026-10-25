@@ -1,6 +1,6 @@
 # Running locally with Groq
 
-CyberRange is a learning project with intentional vulnerabilities. This document describes how to run the existing application manually; the commands are not executed automatically. Table, user, and session setup is implemented in `scripts/admin_setup.py`; learning documents/CTF and isolated SQLi remain separate tasks.
+CyberRange is a learning project with intentional vulnerabilities. This document describes how to run the existing application manually; the commands are not executed automatically. Table, user, and session setup is implemented in `scripts/admin_setup.py`; isolated SQLi preparation is described below. Learning documents/CTF remain separate tasks.
 
 ## 1. Environment
 
@@ -63,6 +63,60 @@ The connection requires `CONNECT` on the database, `USAGE` and `CREATE` on the t
 
 Failures produce a short message without the DSN, passwords, or SQL parameters, and a nonzero exit code. If the connection is lost during commit, the outcome may be unknown: after recovery, repeat the command with the same parameters. This script does not yet load learning documents or flags.
 
+### Preparing the educational SQLi search
+
+Do this explicitly for each existing lab, using an administrative connection to
+the same database as the API:
+
+```bash
+.venv/bin/python scripts/provision_sqli.py --lab-id <existing-lab-uuid>
+```
+
+The command asks for a separate reader password (at least 24 characters), creates
+restricted roles and protected views, and outputs their names. Save that password
+locally; existing objects are never overwritten or rotated automatically. The
+reader can search its lab's chat history and discover its audit events through
+SQLi. It cannot read source tables, other labs, users or defense settings. This
+does not create documents or flags, and does not start any services.
+
+Create a local secret JSON mapping each canonical lab UUID to its reader URL:
+
+```json
+{
+  "<lab-uuid>": "postgresql+asyncpg://sqli_read_<uuid-without-hyphens>:<percent-encoded-reader-password>@localhost:5432/cyberrange"
+}
+```
+
+For example, store it at `.local-sqli59/readers.json` (gitignored), with directory
+permissions 0700 and file permissions 0600. Replace the placeholders locally;
+never commit the populated file. The host, port and database must match
+`DATABASE_URL`. Then configure the API environment or local `.env`:
+
+```dotenv
+SQLI_CONNECTIONS_FILE=.local-sqli59/readers.json
+```
+
+Relative file paths resolve from the repository root. Restart the API after
+changing the setting. Missing/invalid lab configuration returns 503 with a
+`SQL_ERROR` event and never falls back to the administrative connection.
+Injectable queries use a separate reader connection, which is closed after each
+request; a syntax/permission error returns 400 and does not break SIEM or the
+next request. The response remains `{"results": [...]}` with id/title/messages
+for each row. Normal search matches titles and serialized messages.
+
+Example `q` values: `Welcome` for a normal search, `' OR TRUE --` to bypass its
+condition, and `' AND FALSE UNION ALL SELECT id,event_type,payload FROM audit_logs --`
+to discover own-lab audit events. Authorization still rejects a foreign session
+before the search starts. SQL errors include safe SQLSTATE descriptions; driver
+exceptions, connection credentials and data values are not copied into errors.
+
+The separately prepared demo uses `cyberrange_setup_test`; do not point the
+ordinary application's database configuration there accidentally. Existing demo
+connections are in `.local-sqli59/connections.json`, and its runtime map is
+`.local-sqli59/readers.json`. The production lab needs its own provisioned views
+and reader credentials. Preparation and real verification are documented in
+[ISSUE_59_ISOLATION.md](docs/tasks/ISSUE_59_ISOLATION.md).
+
 ## 3. Starting the API and dashboard
 
 In the first terminal, from the repository root with the Python environment activated:
@@ -100,7 +154,7 @@ Isolated seed unit tests use the standard library and need no `.env`, network, o
 python3 -m unittest discover -s backend/tests -p test_admin_setup.py -v
 ```
 
-They check logic using storage, transaction, and hashing doubles. This suite does not test real PostgreSQL, bcrypt, SQLAlchemy, or login routes. A separate opt-in integration check covers those; commands and results on PostgreSQL 15.19 are in [ISSUE_58_VALIDATION.md](ISSUE_58_VALIDATION.md). The remaining tests require the existing `requirements-test.txt`:
+They check logic using storage, transaction, and hashing doubles. This suite does not test real PostgreSQL, bcrypt, SQLAlchemy, or login routes. A separate opt-in [PostgreSQL setup test](backend/tests/integration/test_admin_setup_postgres.py) covers those; see [backend test instructions](backend/tests/README.md) for its required environment variables. The remaining tests require the existing `requirements-test.txt`:
 
 ```bash
 python -m pip install -r backend/requirements-test.txt
@@ -123,4 +177,4 @@ The Node test command uses built-in TypeScript support in Node.js 24 and require
 6. Purchase a defense and check budget deduction, button state, and the corresponding API behavior. In particular, JWT role forgery should work only before the defense is enabled.
 7. Confirm that a Groq failure leaves the event uninvestigated and that the dashboard displays API errors, including token expiry.
 
-The full scenario with real services has not yet been confirmed. Database setup and login were checked against a separate test PostgreSQL database for Issue #58; that check did not run the full API lifecycle. Learning data and SQLi/CTF are not ready yet. Containers, the database, and `.env` were not created as part of the seed implementation.
+The full scenario with real services has not yet been confirmed. Database setup and login were checked against a separate test PostgreSQL database for Issue #58. Isolated SQLi, mounted history requests and SIEM were checked with real test PostgreSQL for Issue #59, without application lifespan or external services. Learning data and CTF are not prepared by these steps. Containers, the database, and `.env` were not created as part of the seed implementation.
