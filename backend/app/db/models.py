@@ -91,6 +91,8 @@ class CtfFlag(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     flag_value = Column(String, nullable=False) # e.g., hashed "Vizja_Sec..."
     reward = Column(Integer, nullable=False)
+    # Owning lab instance's canonical UUID string (str(GameSession.lab_instance_id)),
+    # not a scenario identifier. The String column is retained without data migration.
     lab_id = Column(String, nullable=False)
 
 

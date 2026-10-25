@@ -59,6 +59,18 @@ Repeat the same command to check idempotency: passwords, UUIDs, budget, defenses
 
 The script uses `Base.metadata.create_all(checkfirst=True)` and one transaction for DDL and seeding. It **does not migrate** an existing schema, delete tables, or change investigation/CTF data. A PostgreSQL advisory lock serializes concurrent runs of this script, including table creation. It does not restrict normal application requests. Timeouts: connection 10 seconds, lock wait 10 seconds, SQL statement 30 seconds.
 
+CTF flag ownership uses the existing `ctf_flags.lab_id` String column: its value
+must be the canonical UUID string of the owning `GameSession.lab_instance_id`
+(lowercase, with hyphens), not a scenario name or session/team UUID. The submit
+route looks up both the SHA-256 hash and the lab from the server-validated user
+identity. The same hash may be registered separately in different labs, each
+with its own flag row and reward. Unknown and foreign flags receive the same
+`400 Invalid flag.` response; successful submissions retain the session's team
+and the authenticated lab. This rule does not alter the schema or rewrite any
+existing flags. Legacy scenario identifiers or other noncanonical lab values
+will not match; inspect existing data and agree on any mapping separately before
+changing those records. Setup does not create or assign educational flags.
+
 The connection requires `CONNECT` on the database, `USAGE` and `CREATE` on the target schema (usually `public`), and read/insert permissions on `users`/`game_sessions`. Creating missing tables also requires appropriate permissions on the types and referenced tables. For a clean local database, the owner role from Compose is sufficient. This is an administrative connection, not the connection for future SQLi exercises. An incompatible existing schema causes failure: schema repair is separate, with no automatic reset.
 
 Failures produce a short message without the DSN, passwords, or SQL parameters, and a nonzero exit code. If the connection is lost during commit, the outcome may be unknown: after recovery, repeat the command with the same parameters. This script does not yet load learning documents or flags.

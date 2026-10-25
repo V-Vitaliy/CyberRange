@@ -34,7 +34,7 @@ async def submit_flag(
 
     hashed_submission = hash_ctf_flag(request.flag_value)
 
-    flag = await CtfRepository.get_flag_by_value(db, hashed_submission)
+    flag = await CtfRepository.get_flag_by_value(db, hashed_submission, lab_instance_id)
 
     if not flag:
         await log_security_event(
