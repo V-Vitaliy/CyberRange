@@ -176,8 +176,14 @@ class CtfRepository:
     """Handles all database operations for CTF Flags and Submissions."""
 
     @staticmethod
-    async def get_flag_by_value(db: AsyncSession, flag_value: str) -> Optional[CtfFlag]:
-        result = await db.execute(select(CtfFlag).where(CtfFlag.flag_value == flag_value))
+    async def get_flag_by_value(
+        db: AsyncSession, flag_value: str, lab_instance_id: str | uuid.UUID
+    ) -> Optional[CtfFlag]:
+        """Find a hash only in its owning lab; lab_id stores the canonical lab UUID."""
+        result = await db.execute(select(CtfFlag).where(
+            CtfFlag.flag_value == flag_value,
+            CtfFlag.lab_id == str(ensure_uuid(lab_instance_id)),
+        ))
         return result.scalars().first()
 
     @staticmethod

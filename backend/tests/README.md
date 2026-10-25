@@ -25,6 +25,13 @@ PYTHONPATH=backend python -m pytest -q -ra backend/tests/services
 ```
 
 CI runs `backend/tests` recursively and includes all groups.
+
+`api/test_ctf.py` exercises the mounted submit route with real signed lab scopes,
+identity checks, repository SQL and submission writes using in-memory SQLite.
+It covers two labs sharing a flag value, foreign/unknown/legacy flag rejection,
+duplicate capture, recorded team/lab/reward and UUID normalization. Only the DB
+transport and SIEM writer are replaced; SIEM assertions check calls, not persisted
+events. These regressions do not verify PostgreSQL or real SIEM persistence.
 Frontend tests remain in `frontend/tests`; run them from the repository root:
 
 ```bash
