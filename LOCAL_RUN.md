@@ -1,4 +1,4 @@
-# Running locally with Groq
+# Running locally with Groq or an OpenAI-compatible server
 
 CyberRange is a learning project with intentional vulnerabilities. This document describes how to run the existing application manually; the commands are not executed automatically. Table, user, and session setup is implemented in `scripts/admin_setup.py`; isolated SQLi preparation is described below. Learning documents/CTF remain separate tasks.
 
@@ -12,7 +12,7 @@ source .venv/bin/activate
 python -m pip install -r backend/requirements-groq.txt
 ```
 
-`requirements-groq.txt` contains the existing application dependencies without `llama-cpp-python`. The full `requirements.txt` includes this list and local llama-cpp support. This lets you start with Groq without compiling a local LLM. Embeddings are still computed by the existing SentenceTransformer on CPU; Groq replaces only text generation.
+`requirements-groq.txt` contains the application dependencies without `llama-cpp-python`, including `langchain-openai` for the HTTP provider. The full `requirements.txt` includes this list and local llama-cpp support. HTTP generation does not require compiling a local LLM. Embeddings are still computed by the existing SentenceTransformer on CPU.
 
 If `.env` does not exist yet, copy `.env.example` to `.env`. Do not overwrite your own settings. Configure:
 
@@ -21,6 +21,65 @@ If `.env` does not exist yet, copy `.env.example` to `.env`. Do not overwrite yo
 - `DATABASE_URL`, `REDIS_URL`: local connections consistent with your database setup.
 - `CHROMA_HOST=localhost`, `CHROMA_PORT=8000`.
 - `SMTP_HOST=`: leave empty for the first run. The email tool will simulate delivery and explicitly report that no email was sent.
+
+For an OpenAI-compatible inference server, configure these values in your local
+`.env` instead of using a Groq key as a local-server switch. Replace the URL and
+model placeholders with the server's base URL and model ID:
+
+```dotenv
+LLM_PROVIDER=openai_compatible
+LLM_BASE_URL=http://<host>:<port>/v1
+LLM_MODEL=<model-id>
+LLM_API_KEY=
+LLM_MAX_TOKENS=2048
+```
+
+The explicit provider takes precedence over `GROQ_API_KEY`. The adapter uses
+`POST /v1/chat/completions` and streams chat. An empty API key uses a dummy local
+key required by the client; set `LLM_API_KEY` if your server requires authentication.
+Without `LLM_PROVIDER` (or with an empty value), the previous behavior remains:
+a nonempty `GROQ_API_KEY` selects Groq with `llama-3.1-8b-instant`; otherwise the
+in-process GGUF path and existing hardware settings apply. No Groq URL or payload
+rewriting is used. Restart the API after changing configuration.
+
+`LLM_MAX_TOKENS` applies only to the OpenAI-compatible provider and includes
+reasoning tokens. With the user's schedule PDF, the configured model exhausted the previous
+512-token budget on `reasoning_content` without producing an answer; 2048
+produced visible text and a normal `stop`. Empty replies and `length` termination
+now surface as SSE errors and are not saved as successful chat turns. Increase
+the configured budget if a longer request still reaches its limit. Groq/GGUF
+retain their existing 512-token defaults.
+
+Streaming through the configured server, email tool calls (SMTP disabled), and SOC function-call output
+were checked separately against this server. SOC sends one schema tool with
+`tool_choice=required`, uses a complete nonstreaming response, and rejects malformed
+JSON, incomplete calls and nonboolean verdicts. Chat keeps streaming and tools.
+Failures propagate; the worker leaves unsuccessful analysis pending. These checks
+do not establish real Groq compatibility. See [verification results](ISSUE_61_VERIFICATION.md)
+for service checks and remaining blockers.
+
+### Local CLI probe (delivered separately, ignored by Git)
+
+From the primary repository root:
+
+```bash
+.venv/bin/python .local-tools/rag_probe.py
+```
+
+It defaults to the application API on `8001`, asks for Red Team login (password
+hidden), a session UUID and questions, and creates one new thread for repeated
+questions. It shows redacted requests, HTTP statuses and joined Unicode SSE
+answers, including errors embedded in HTTP 200. Use `--base-url http://127.0.0.1:8002`
+only when deliberately targeting the separately configured test API.
+
+PDF upload is optional and requires an explicit path and confirmation. Ordinary
+uploads do not index; the current lab exercise indexes multipart filenames
+`../student_uploads/<basename>` within the authenticated lab. An upload response
+does not establish ETL completion; check `/api/red/ws/etl-status/{task_id}` with
+the same authenticated identity. Existing filenames can be overwritten by the
+API, so choose the path deliberately. The helper never uploads automatically or
+saves responses/credentials. `.local-tools` is ignored and is not delivered by
+a commit or PR; retain the separately supplied local script.
 
 ## 2. Services and document processing data
 
@@ -158,6 +217,13 @@ After login, the dashboard gets the session ID from `/api/blue/me`. The `?sessio
 
 Red Team uses the API. For protected requests, pass `Authorization: Bearer <access_token>` using the token returned by login. There is no separate browser-based Red Team chat yet. Old tokens without `lab_scope` require a new login.
 
+In Swagger, first call `/login`, copy only the returned `access_token` value,
+then click **Authorize** and paste that token **without** the `Bearer` prefix.
+The HTTP Bearer scheme adds the prefix and sends the header automatically.
+Authorize separately in the Red and Blue sub-app documentation using the
+appropriate user. An ordinary OpenAPI header parameter named `Authorization`
+does not work in Swagger; protected endpoints use the Bearer security scheme.
+
 ## 4. Checks before integration startup
 
 Isolated seed unit tests use the standard library and need no `.env`, network, or installed backend dependencies:
@@ -189,4 +255,9 @@ The Node test command uses built-in TypeScript support in Node.js 24 and require
 6. Purchase a defense and check budget deduction, button state, and the corresponding API behavior. In particular, JWT role forgery should work only before the defense is enabled.
 7. Confirm that a Groq failure leaves the event uninvestigated and that the dashboard displays API errors, including token expiry.
 
-The full scenario with real services has not yet been confirmed. Database setup and login were checked against a separate test PostgreSQL database for Issue #58. Isolated SQLi, mounted history requests and SIEM were checked with real test PostgreSQL for Issue #59, without application lifespan or external services. Learning data and CTF are not prepared by these steps. Containers, the database, and `.env` were not created as part of the seed implementation.
+The checks above are a manual checklist, not a claim that every scenario passed.
+The [Issue #61 verification report](ISSUE_61_VERIFICATION.md) distinguishes actual
+model/PostgreSQL/Redis/Chroma/API checks from offline tests and blocked PDF/CTF/Groq
+scenarios. Learning data and CTF flags are not prepared by setup. Never use a
+working-directory change as database isolation: select a test database explicitly
+before purchases, investigations or other modifying checks.

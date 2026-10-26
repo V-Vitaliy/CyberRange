@@ -137,6 +137,10 @@ celerybeat.pid
 # Environments
 .env
 .local-sqli59/
+/.local-tools/
+/.worktrees/
+/lab_uploads/
+/ISSUE_61_VERIFICATION.md
 # Local agent instructions and working documentation
 /AGENTS.md
 /CLAUDE.md

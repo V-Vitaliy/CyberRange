@@ -4,7 +4,9 @@ from functools import partial
 from pydantic import BaseModel, Field
 
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnableLambda
 from langgraph.graph import StateGraph, END
+from langchain_openai import ChatOpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -60,9 +62,30 @@ async def analyze_security_log(state: SOCState, *, analysis_chain) -> Dict[str, 
 # ---------------------------------------------------------
 # GRAPH COMPILATION
 # ---------------------------------------------------------
+def parse_soc_tool_response(message):
+    """Nonstreaming tool parsing rejects malformed JSON instead of repairing it."""
+    calls = message.tool_calls
+    if (message.invalid_tool_calls or len(calls) != 1
+            or message.response_metadata.get("finish_reason") != "tool_calls"):
+        raise ValueError("SOC requires one complete AnalysisOutput tool call")
+    if calls[0].get("name") != "AnalysisOutput":
+        raise ValueError("Unexpected SOC tool")
+    return AnalysisOutput.model_validate(calls[0]["args"], strict=True)
+
+
 def create_soc_graph(llm):
     """Build SOC lazily from the model selected by the application."""
-    chain = soc_prompt | llm.with_structured_output(AnalysisOutput)
+    if isinstance(llm, ChatOpenAI):
+        # One schema tool + required is equivalent to selecting that tool by
+        # name. This server rejects object-valued tool_choice. SOC uses a full
+        # response to reject malformed JSON; streaming aggregation repairs partial
+        # arguments. Chat continues streaming independently on the base model.
+        structured = llm.bind_tools(
+            [AnalysisOutput], tool_choice="required", parallel_tool_calls=False,
+        ).bind(stream=False) | RunnableLambda(parse_soc_tool_response)
+    else:
+        structured = llm.with_structured_output(AnalysisOutput)
+    chain = soc_prompt | structured
     workflow = StateGraph(SOCState)
     workflow.add_node("analyze", partial(analyze_security_log, analysis_chain=chain))
     workflow.set_entry_point("analyze")
