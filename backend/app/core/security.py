@@ -7,7 +7,8 @@ from app.core.config import settings
 from app.db.database import get_db
 from app.db.models import User
 from app.db.repository import UserRepository, GameSessionRepository, ensure_uuid
-from fastapi import Depends, HTTPException, Header, status
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # ---------------------------------------------------------
@@ -41,6 +42,25 @@ ALGORITHM = getattr(settings, "JWT_ALGORITHM", "HS256")
 if not SECRET_KEY:
     raise RuntimeError("SECRET_KEY not set in configuration")
 
+bearer_auth = HTTPBearer(
+    scheme_name="BearerAuth",
+    bearerFormat="JWT",
+    description="Paste access_token only; Swagger adds the Bearer prefix.",
+    auto_error=False,
+)
+
+
+async def get_bearer_authorization(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_auth),
+) -> str | None:
+    # Declare HTTP authentication in OpenAPI: Swagger ignores Authorization
+    # when it is declared as an ordinary header parameter. JWT verification
+    # and the intentional Red Team behavior remain in the existing functions.
+    if credentials is None:
+        return None
+    return f"Bearer {credentials.credentials}"
+
+
 def create_access_token(data: dict, expires_delta: timedelta | None = None):
     """Creates a cryptographically signed JWT token."""
     to_encode = data.copy()
@@ -57,7 +77,7 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
 # SECURE AUTHENTICATION (Blue Team)
 # =========================================================
 async def get_current_user_secure(
-    authorization: str = Header(None),
+    authorization: str | None = Depends(get_bearer_authorization),
     db: AsyncSession = Depends(get_db)
 ) -> User:
     """
@@ -110,7 +130,7 @@ async def get_authorized_session(db, session_id, lab_instance_id):
 
 
 async def get_current_user_vulnerable(
-    authorization: str = Header(None),
+    authorization: str | None = Depends(get_bearer_authorization),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Allow role forgery only within the authenticated student's laboratory."""

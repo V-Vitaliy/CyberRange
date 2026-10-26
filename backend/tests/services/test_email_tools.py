@@ -51,6 +51,24 @@ async def test_plain_answer_keeps_streaming_without_email(harness):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('chunks', [
+    [],
+    [AIMessageChunk(content='', additional_kwargs={'reasoning_content': 'reasoning only'})],
+    [AIMessageChunk(content='', response_metadata={'finish_reason': 'length'})],
+    [AIMessageChunk(content='partial answer', response_metadata={'finish_reason': 'length'})],
+    [AIMessageChunk(content='', response_metadata={'finish_reason': 'length'}, tool_call_chunks=[{
+        'name': 'send_email', 'id': 'call1', 'index': 0,
+        'args': '{"to_address":"student@example.invalid","subject":"Test","body":"Hello"}',
+    }])],
+])
+async def test_empty_or_truncated_model_output_fails_without_tool_execution(harness, chunks):
+    with pytest.raises(RuntimeError, match='Model (returned no answer|output limit reached)'):
+        await run_stream(chunks)
+    harness[0].assert_not_awaited()
+    harness[1].assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_split_tool_arguments_execute_once_and_report_simulation(harness):
     audit, delivery = harness
     output = await run_stream([
@@ -156,6 +174,35 @@ async def test_chat_sse_records_simulated_tool_result_and_history(harness, monke
     assert 'No email was sent' in history.call_args.kwargs['ai_response']
     assert audit.call_args.kwargs['lab_instance_id'] == str(lab_id)
     delivery.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('finish_reason', ['stop', 'length'])
+async def test_empty_chat_emits_sse_error_without_saving_success(harness, monkeypatch, finish_reason):
+    from app.services import rag_service
+    from app.db.repository import ChatRepository
+    from app.core.queue_manager import LLMQueueManager
+
+    lab_id = uuid4()
+    session = SimpleNamespace(lab_instance_id=lab_id, use_reranker=False, system_prompt='test')
+    monkeypatch.setattr(rag_service, 'get_authorized_session', AsyncMock(return_value=session))
+    monkeypatch.setattr(ChatRepository, 'get_or_create_thread', AsyncMock())
+    history = AsyncMock()
+    monkeypatch.setattr(ChatRepository, 'append_messages', history)
+
+    async def stream(messages):
+        yield AIMessageChunk(content='', response_metadata={'finish_reason': finish_reason})
+
+    model = Mock()
+    model.bind_tools.return_value = SimpleNamespace(astream=stream)
+    user = dict(id=str(uuid4()), sub='student', role='red_team', lab_instance_id=str(lab_id))
+    store = SimpleNamespace(search_documents=Mock(return_value={'documents': [[]]}))
+    parts = [part async for part in rag_service.generate_chat_response_sse(
+        object(), uuid4(), uuid4(), 'Question', LLMQueueManager(), store, user, model)]
+    assert parts[-1] == 'data: [DONE]\n\n'
+    assert 'error' in json.loads(parts[0][6:])
+    history.assert_not_awaited()
+    harness[1].assert_not_called()
 
 
 @pytest.mark.asyncio

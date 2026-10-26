@@ -1,5 +1,7 @@
 from pydantic_settings import BaseSettings,SettingsConfigDict
 from pathlib import Path
+from typing import Literal
+from pydantic import Field
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
 
@@ -14,6 +16,14 @@ class Settings(BaseSettings):
 
     # An empty key selects the existing local LLM path.
     GROQ_API_KEY: str = ""
+
+    # Empty preserves automatic Groq/GGUF selection.
+    LLM_PROVIDER: Literal["", "openai_compatible"] = ""
+    LLM_BASE_URL: str = ""
+    LLM_MODEL: str = ""
+    LLM_API_KEY: str = ""
+    # HTTP models may spend part of this budget on reasoning before answering.
+    LLM_MAX_TOKENS: int = Field(default=2048, gt=0)
 
     # LLM Hardware Optimizations (Defaults based on g4dn.xlarge / RTX 3060)
     LLM_MODEL_PATH: str = "../../models/Meta-Llama-3-8B.Q4_K_M.gguf"

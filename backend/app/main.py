@@ -11,7 +11,7 @@ from app.api.routes_red import router as red_router
 from app.api.routes_ctf import router as ctf_router
 from app.api.routes_blue import router as blue_router
 from app.core.config import settings
-from app.core.llm_engine import init_groq,init_llm
+from app.core.llm_engine import init_groq, init_llm, init_openai_compatible
 from app.services.soc_worker import run_soc_analyst_loop
 from app.agents.soc_agent import create_soc_graph
 
@@ -37,7 +37,9 @@ async def lifespan(app: FastAPI):
     queue_manager = LLMQueueManager()
     vector_store = VectorStore()
 
-    if settings.GROQ_API_KEY:
+    if settings.LLM_PROVIDER == "openai_compatible":
+        llm_instance = init_openai_compatible()
+    elif settings.GROQ_API_KEY:
         llm_instance = init_groq()
     else:
         llm_instance = init_llm()

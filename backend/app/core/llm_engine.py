@@ -12,6 +12,7 @@ from fastapi import Request
 from langchain_community.chat_models import ChatLlamaCpp
 from langchain_core.messages import HumanMessage,SystemMessage
 from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.siem_logger import log_security_event
 
@@ -42,6 +43,24 @@ def init_llm() -> ChatLlamaCpp:
     print("Local LangChain Model loaded successfully!")
     return llm
 
+def init_openai_compatible() -> ChatOpenAI:
+    """Use the chat-completions API, including for models without cloud keys."""
+    if not settings.LLM_BASE_URL.strip() or not settings.LLM_MODEL.strip():
+        raise ValueError("LLM_BASE_URL and LLM_MODEL must be nonempty")
+    return ChatOpenAI(
+        base_url=settings.LLM_BASE_URL,
+        model=settings.LLM_MODEL,
+        api_key=settings.LLM_API_KEY or "local-no-key",
+        temperature=0.1,
+        max_tokens=settings.LLM_MAX_TOKENS,
+        streaming=True,
+        stream_usage=False,
+        use_responses_api=False,
+        timeout=120,
+        max_retries=0,
+    )
+
+
 def init_groq() -> ChatGroq:
     logger.info("Initializing Groq API via LangChain...")
     return ChatGroq(
@@ -71,13 +90,20 @@ async def generate_unified_stream(
         logger.warning("Selected model does not support tools; continuing text-only chat")
         chat_model = llm_instance
     response = None
+    has_text = False
     async for chunk in chat_model.astream(messages):
         response = chunk if response is None else response + chunk
         if isinstance(chunk.content, str) and chunk.content:
+            has_text = has_text or bool(chunk.content.strip())
             yield chunk.content
 
-    if response is None:
-        return
+    if response is not None and response.response_metadata.get("finish_reason") == "length":
+        raise RuntimeError(
+            "Model output limit reached before completion. "
+            "For the OpenAI-compatible provider, increase LLM_MAX_TOKENS."
+        )
+    if response is None or (not has_text and not response.tool_call_chunks):
+        raise RuntimeError("Model returned no answer or tool call.")
 
     # Parse the completed raw JSON strictly: partial streamed JSON must never
     # execute a tool, even if the adapter can repair it for display purposes.
