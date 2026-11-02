@@ -212,3 +212,23 @@ async def test_server_failure_is_propagated(monkeypatch):
     with pytest.raises(BadRequestError):
         async for _ in model.bind_tools([send_email]).astream("hello"):
             pass
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "address,body,event_type,delivery",
+    [
+        ("attacker@example.com", "hello", "AI_EMAIL_BLOCKED", "blocked"),
+        ("attacker@example.com", "flag{test}", "AI_DATA_EXFILTRATION", "blocked"),
+        ("student@lab.local", "hello", "AI_EMAIL_SENT", "sent"),
+    ],
+)
+async def test_real_smtp_only_delivers_to_lab_domains(harness, monkeypatch, address, body, event_type, delivery):
+    audit, send = harness
+    monkeypatch.setattr(llm_engine.settings, "SMTP_HOST", "smtp.lab.invalid")
+    monkeypatch.setattr(llm_engine.settings, "EMAIL_ALLOWED_DOMAINS", "lab.local")
+    output = await run_stream([tool_chunk(json.dumps(dict(to_address=address, subject="Test", body=body)))])
+    assert send.called is (delivery == "sent")
+    assert audit.call_args.kwargs["event_type"] == event_type
+    assert audit.call_args.kwargs["payload"]["delivery"] == delivery
+    assert ("blocked" in output) is (delivery == "blocked")

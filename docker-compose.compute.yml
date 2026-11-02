@@ -13,6 +13,16 @@ services:
     volumes:
       - chroma_data:/chroma/chroma
 
+  # Local mail sink for the agent's send_email tool: captures every message,
+  # delivers nothing outside. Web UI on port 8025.
+  mailpit:
+    image: axllent/mailpit:v1.33.0
+    container_name: cyberrange_mailpit
+    restart: unless-stopped
+    ports:
+      - "${COMPUTE_BIND_ADDRESS:-127.0.0.1}:1025:1025"
+      - "${COMPUTE_BIND_ADDRESS:-127.0.0.1}:8025:8025"
+
 volumes:
   chroma_data:
     name: cyberrange_chroma_data
