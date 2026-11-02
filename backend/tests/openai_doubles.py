@@ -1,4 +1,5 @@
 """Offline HTTP doubles for the real OpenAI-compatible adapter."""
+
 import json
 
 import httpx
@@ -12,8 +13,10 @@ def make_model(monkeypatch, handler):
     monkeypatch.setattr(llm_engine.settings, "LLM_API_KEY", "")
     monkeypatch.setattr(llm_engine.settings, "LLM_MAX_TOKENS", 3072)
     original = llm_engine.ChatOpenAI
+
     def adapter(**kwargs):
         return original(**kwargs, http_async_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+
     monkeypatch.setattr(llm_engine, "ChatOpenAI", adapter)
     return llm_engine.init_openai_compatible()
 
@@ -32,6 +35,10 @@ def assert_request(request, stream=True):
 
 
 def sse(delta, finish_reason=None):
-    body = {"id": "offline", "model": "test-model", "object": "chat.completion.chunk",
-            "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}]}
+    body = {
+        "id": "offline",
+        "model": "test-model",
+        "object": "chat.completion.chunk",
+        "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
+    }
     return "data: " + json.dumps(body) + "\n\n"

@@ -1,8 +1,9 @@
-from sqlalchemy import Column, Integer, String, Boolean, Text, DateTime, ForeignKey
-from sqlalchemy.orm import declarative_base
-from sqlalchemy.sql import func
-from sqlalchemy.dialects.postgresql import UUID, JSONB
 import uuid
+
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.sql import func
+
 from app.db.database import Base
 
 
@@ -25,6 +26,7 @@ class GameSession(Base):
     """
     State of the game and Blue Team economy.
     """
+
     __tablename__ = "game_sessions"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -47,6 +49,7 @@ class ChatThread(Base):
     Stores individual chat sessions for the Red Team UI.
     Separates chat history from immutable security audit logs.
     """
+
     __tablename__ = "chat_threads"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -65,6 +68,7 @@ class SecurityAuditLog(Base):
     """
     Forensics and SIEM Logs for the Blue Team.
     """
+
     __tablename__ = "security_audit_logs"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -87,9 +91,10 @@ class CtfFlag(Base):
     """
     Dictionary of hidden secrets/flags to be stolen by the Red Team.
     """
+
     __tablename__ = "ctf_flags"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    flag_value = Column(String, nullable=False) # e.g., hashed "Vizja_Sec..."
+    flag_value = Column(String, nullable=False)  # e.g., hashed "Vizja_Sec..."
     reward = Column(Integer, nullable=False)
     # Owning lab instance's canonical UUID string (str(GameSession.lab_instance_id)),
     # not a scenario identifier. The String column is retained without data migration.
@@ -100,6 +105,7 @@ class CtfSubmission(Base):
     """
     Tracks successfully captured flags by the Red Team for auto-grading.
     """
+
     __tablename__ = "ctf_submissions"
     id = Column(Integer, primary_key=True, autoincrement=True)
     team_id = Column(UUID(as_uuid=True), nullable=False)

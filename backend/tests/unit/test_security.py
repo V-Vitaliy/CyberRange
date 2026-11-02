@@ -40,7 +40,9 @@ async def test_role_forgery_only_works_without_defense(identity, protected, algo
     session.jwt_filter_enabled = protected
     payload = jwt.decode(security.create_access_token(claims), options={"verify_signature": False})
     payload["role"] = "admin"
-    token = jwt.encode(payload, None if algorithm == "none" else "attacker-test-key-with-at-least-32-bytes", algorithm=algorithm)
+    token = jwt.encode(
+        payload, None if algorithm == "none" else "attacker-test-key-with-at-least-32-bytes", algorithm=algorithm
+    )
     if protected:
         with pytest.raises(HTTPException) as exc:
             await security.get_current_user_vulnerable(f"Bearer {token}", object())
@@ -51,7 +53,9 @@ async def test_role_forgery_only_works_without_defense(identity, protected, algo
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("key,value", [("id", str(uuid4())), ("lab_instance_id", str(uuid4())), ("sub", "another-user")])
+@pytest.mark.parametrize(
+    "key,value", [("id", str(uuid4())), ("lab_instance_id", str(uuid4())), ("sub", "another-user")]
+)
 async def test_forged_identity_cannot_escape_lab_scope(identity, key, value):
     _, _, claims = identity
     payload = jwt.decode(security.create_access_token(claims), options={"verify_signature": False})
@@ -96,7 +100,9 @@ async def test_blue_api_role_guard(role):
 
 @pytest.mark.asyncio
 async def test_session_from_another_lab_is_not_available(monkeypatch):
-    monkeypatch.setattr(security.GameSessionRepository, "get_by_id", AsyncMock(return_value=SimpleNamespace(lab_instance_id=uuid4())))
+    monkeypatch.setattr(
+        security.GameSessionRepository, "get_by_id", AsyncMock(return_value=SimpleNamespace(lab_instance_id=uuid4()))
+    )
     with pytest.raises(HTTPException) as exc:
         await security.get_authorized_session(object(), uuid4(), uuid4())
     assert exc.value.status_code == 404

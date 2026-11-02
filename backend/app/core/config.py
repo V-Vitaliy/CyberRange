@@ -1,15 +1,18 @@
-from pydantic_settings import BaseSettings,SettingsConfigDict
 from pathlib import Path
 from typing import Literal
+
 from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
+
 
 class Settings(BaseSettings):
     """
     Application settings.
     Values are overridden by environment variables in the .env file.
     """
+
     # Project Info
     PROJECT_NAME: str = "AI CyberRange"
     VERSION: str = "1.0.0"
@@ -46,11 +49,11 @@ class Settings(BaseSettings):
     # Context window size (Standard for Llama-3)
     LLM_N_CTX: int = 8192
 
-    #Chromadb
+    # Chromadb
     CHROMA_HOST: str = "localhost"
     CHROMA_PORT: int = 8000
 
-    #Postgres
+    # Postgres
     DATABASE_URL: str = "postgresql+asyncpg://cyberadmin:cyberpassword123@127.0.0.1:5432/cyberrange"
 
     # Explicit local JSON mapping {lab UUID: restricted PostgreSQL URL}.
@@ -68,8 +71,7 @@ class Settings(BaseSettings):
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
 
-    model_config = SettingsConfigDict( env_file=str(ROOT_DIR / ".env"),
-                                      env_file_encoding="utf-8",
-                                      extra="ignore")
+    model_config = SettingsConfigDict(env_file=str(ROOT_DIR / ".env"), env_file_encoding="utf-8", extra="ignore")
+
 
 settings = Settings()

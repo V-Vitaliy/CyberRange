@@ -4,15 +4,15 @@ Run separately from the mocked backend suite. Set both
 CYBERRANGE_SETUP_TEST_DATABASE_URL and CYBERRANGE_SETUP_TEST_DATABASE_NAME.
 No containers, database creation, teardown, or external model calls.
 """
+
 import asyncio
-from datetime import datetime, timezone
 import os
-from pathlib import Path
 import secrets
 import sys
 import unittest
+from datetime import datetime, timezone
+from pathlib import Path
 from uuid import UUID, uuid4
-
 
 ROOT = Path(__file__).resolve().parents[3]
 TEST_URL = os.environ.get("CYBERRANGE_SETUP_TEST_DATABASE_URL")
@@ -33,12 +33,13 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
         from sqlalchemy.engine import make_url
         from sqlalchemy.exc import DBAPIError
         from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-        from app.core.security import verify_password
-        from app.db.database import Base, engine as app_engine
+
+        from app.core.security import get_password_hash, verify_password
+        from app.db.database import Base
+        from app.db.database import engine as app_engine
         from app.db.models import ChatThread, GameSession, SecurityAuditLog, User
         from app.main import app
         from scripts.admin_setup import Options, SqlStore, seed_transaction
-        from app.core.security import get_password_hash
 
         url = make_url(TEST_URL)
         self.assertEqual(url.drivername, "postgresql+asyncpg")
@@ -51,21 +52,28 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
         # Whitespace, Unicode, and >72 UTF-8 bytes exercise the real login hash path.
         red_password = "  " + secrets.token_urlsafe(64) + "\u044f  "
         blue_password = secrets.token_urlsafe(32)
-        env = dict(os.environ, RED_TEAM_PASSWORD=red_password,
-                   BLUE_TEAM_PASSWORD=blue_password)
+        env = dict(os.environ, RED_TEAM_PASSWORD=red_password, BLUE_TEAM_PASSWORD=blue_password)
         cli_count = 0
 
-        async def cli(lab=lab_id, red=red_name, blue=blue_name, extra=(), success=True,
-                      process_env=None):
+        async def cli(lab=lab_id, red=red_name, blue=blue_name, extra=(), success=True, process_env=None):
             nonlocal cli_count
             cli_count += 1
             proc = await asyncio.create_subprocess_exec(
-                sys.executable, str(ROOT / "scripts/admin_setup.py"),
-                "--lab-id", str(lab), "--red-username", red,
-                "--blue-username", blue, *extra,
-                cwd=ROOT, env=process_env or env,
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                stdin=asyncio.subprocess.DEVNULL)
+                sys.executable,
+                str(ROOT / "scripts/admin_setup.py"),
+                "--lab-id",
+                str(lab),
+                "--red-username",
+                red,
+                "--blue-username",
+                blue,
+                *extra,
+                cwd=ROOT,
+                env=process_env or env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                stdin=asyncio.subprocess.DEVNULL,
+            )
             try:
                 stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
             except TimeoutError:
@@ -80,6 +88,7 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(proc.returncode, 0, "Setup CLI failed (output withheld)")
                 self.assertFalse(stderr, "Successful CLI emitted stderr")
                 import json
+
                 return json.loads(stdout)
             self.assertNotEqual(proc.returncode, 0, "Conflicting CLI succeeded")
             self.assertFalse(stdout, "Failed CLI emitted success output")
@@ -106,12 +115,16 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
             failed_lab = uuid4()
             with self.assertRaises(DBAPIError):
                 await seed_transaction(
-                    engine, AsyncSession, Base.metadata, text,
+                    engine,
+                    AsyncSession,
+                    Base.metadata,
+                    text,
                     lambda db: FailingStore(db, User, GameSession, select),
                     Options(failed_lab, prefix + "_failred", prefix + "_failblue"),
-                    lambda _: red_password, get_password_hash)
-            self.assertTrue(before == await snapshot(),
-                            "Failed transaction changed tables or committed records")
+                    lambda _: red_password,
+                    get_password_hash,
+                )
+            self.assertTrue(before == await snapshot(), "Failed transaction changed tables or committed records")
 
         try:
             asyncio.get_running_loop().set_debug(False)
@@ -145,12 +158,20 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
                 session.rate_limit_enabled = True
                 session.rate_limit_rpm = 7
                 session.jwt_filter_enabled = True
-                db.add(ChatThread(user_id=red.id, session_id=session.id,
-                                  messages=[{"role": "user", "content": "saved progress"}]))
-                db.add(SecurityAuditLog(lab_instance_id=lab_id, event_type="SETUP_TEST_PROGRESS",
-                                       payload={"integration": True},
-                                       investigated_at=datetime.now(timezone.utc),
-                                       investigated_by=blue.id))
+                db.add(
+                    ChatThread(
+                        user_id=red.id, session_id=session.id, messages=[{"role": "user", "content": "saved progress"}]
+                    )
+                )
+                db.add(
+                    SecurityAuditLog(
+                        lab_instance_id=lab_id,
+                        event_type="SETUP_TEST_PROGRESS",
+                        payload={"integration": True},
+                        investigated_at=datetime.now(timezone.utc),
+                        investigated_by=blue.id,
+                    )
+                )
                 await db.commit()
 
             progress = await snapshot()
@@ -166,37 +187,46 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
 
             # Exercise actual mounted HTTP routes, auth dependencies and DB repositories.
             # ASGITransport does not run lifespan: no Redis/Chroma/LLM startup.
-            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
-                                         base_url="http://integration") as client:
-                for side, name, password in (("red", red_name, red_password),
-                                              ("blue", blue_name, blue_password)):
-                    response = await client.post(f"/api/{side}/login",
-                                                 json={"username": name, "password": password})
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://integration"
+            ) as client:
+                for side, name, password in (("red", red_name, red_password), ("blue", blue_name, blue_password)):
+                    response = await client.post(f"/api/{side}/login", json={"username": name, "password": password})
                     self.assertEqual(response.status_code, 200, "Real login failed")
                     token = response.json()["access_token"]
                     claims = jwt.decode(token, os.environ["JWT_SECRET"], algorithms=["HS256"])
                     self.assertEqual(claims["lab_instance_id"], str(lab_id))
                     self.assertEqual(claims["role"], side + "_team")
                     if side == "red":
-                        scope = jwt.decode(claims["lab_scope"], os.environ["JWT_SECRET"],
-                                           algorithms=["HS256"], audience="red-lab-scope")
+                        scope = jwt.decode(
+                            claims["lab_scope"],
+                            os.environ["JWT_SECRET"],
+                            algorithms=["HS256"],
+                            audience="red-lab-scope",
+                        )
                         self.assertEqual(scope["lab_instance_id"], str(lab_id))
                     else:
                         profile = await client.get("/api/blue/me", headers={"Authorization": "Bearer " + token})
                         self.assertEqual(profile.status_code, 200)
                         self.assertEqual(profile.json()["session_id"], first["session_id"])
-                    bad = await client.post(f"/api/{side}/login",
-                                            json={"username": name, "password": "incorrect"})
+                    bad = await client.post(f"/api/{side}/login", json={"username": name, "password": "incorrect"})
                     self.assertEqual(bad.status_code, 401)
-                for side, name, password in (("red", blue_name, blue_password),
-                                              ("blue", red_name, red_password)):
-                    denied = await client.post(f"/api/{side}/login",
-                                               json={"username": name, "password": password})
+                for side, name, password in (("red", blue_name, blue_password), ("blue", red_name, red_password)):
+                    denied = await client.post(f"/api/{side}/login", json={"username": name, "password": password})
                     self.assertEqual(denied.status_code, 403)
             async with db_factory() as db:
-                events = (await db.execute(select(SecurityAuditLog).where(
-                    SecurityAuditLog.lab_instance_id == lab_id,
-                    SecurityAuditLog.event_type == "RED_TEAM_LOGIN"))).scalars().all()
+                events = (
+                    (
+                        await db.execute(
+                            select(SecurityAuditLog).where(
+                                SecurityAuditLog.lab_instance_id == lab_id,
+                                SecurityAuditLog.event_type == "RED_TEAM_LOGIN",
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
                 self.assertEqual(len(events), 1, "Red login audit was not persisted")
 
             # Every CLI conflict must leave all rows unchanged, including unrelated labs.
@@ -214,10 +244,17 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
             partial_lab, team = uuid4(), uuid4()
             partial_blue = prefix + "_partialblue"
             async with db_factory() as db:
-                db.add(User(username=partial_blue, role="blue_team", lab_instance_id=partial_lab,
-                            password_hash=get_password_hash(blue_password)))
-                partial_session = GameSession(lab_instance_id=partial_lab, team_id=team,
-                                              defense_budget=1, is_solo=False)
+                db.add(
+                    User(
+                        username=partial_blue,
+                        role="blue_team",
+                        lab_instance_id=partial_lab,
+                        password_hash=get_password_hash(blue_password),
+                    )
+                )
+                partial_session = GameSession(
+                    lab_instance_id=partial_lab, team_id=team, defense_budget=1, is_solo=False
+                )
                 db.add(partial_session)
                 await db.commit()
                 partial_id = partial_session.id
@@ -236,15 +273,25 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
 
             # Integer overflow reaches a real INSERT failure through the CLI.
             before = await snapshot()
-            await cli(lab=uuid4(), red=prefix + "_overflowred", blue=prefix + "_overflowblue",
-                      extra=("--budget", "2147483648"), success=False)
+            await cli(
+                lab=uuid4(),
+                red=prefix + "_overflowred",
+                blue=prefix + "_overflowblue",
+                extra=("--budget", "2147483648"),
+                success=False,
+            )
             self.assertTrue(before == await snapshot(), "Failed CLI transaction left records")
 
             # Real connection failure must also yield sanitized CLI failure.
-            failure_env = dict(env, DATABASE_URL=url.set(database=prefix + "_absent").render_as_string(hide_password=False))
+            failure_env = dict(
+                env, DATABASE_URL=url.set(database=prefix + "_absent").render_as_string(hide_password=False)
+            )
             await cli(process_env=failure_env, success=False)
-            print(f"PostgreSQL {version}; database={TEST_DATABASE}; CLI runs={cli_count}; "
-                  f"initially_empty={not before_tables}; retained prefix={prefix}", flush=True)
+            print(
+                f"PostgreSQL {version}; database={TEST_DATABASE}; CLI runs={cli_count}; "
+                f"initially_empty={not before_tables}; retained prefix={prefix}",
+                flush=True,
+            )
         finally:
             await engine.dispose()
             await app_engine.dispose()
