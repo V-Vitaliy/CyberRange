@@ -63,7 +63,6 @@ existing GGUF loader is used. An HTTP server does not require a local GGUF file.
 Documents and flags are supplied by the operator. Setup does not download PDFs,
 index a dataset or register flags. PDF upload and CTF registration are separate:
 CTF needs the flag's SHA-256 hash, the owning lab UUID and a reward in PostgreSQL.
-The file in `scripts/golden_data/` is a placeholder, not a usable dataset.
 
 There is no Red Team browser chat yet. Use Swagger, an HTTP client or the
 separately delivered `.local-tools/rag_probe.py` helper. That helper, uploaded
@@ -85,8 +84,7 @@ not included in a fresh clone.
 - **Inference:** streamed chat and a shared model queue; Auto-SOC uses a LangGraph
   workflow with the selected model. Manual investigation scoring currently uses
   regex heuristics, not a trained ML classifier.
-- **Storage:** uploaded PDFs are local files. MinIO remains in the compute
-  Compose file but is not used by the current PDF upload path.
+- **Storage:** uploaded PDFs are local files under `lab_uploads/`.
 
 ## Tests and confidence
 
@@ -129,9 +127,9 @@ The next priorities are reliability and clearer verification of existing feature
 The following are unfinished ideas, not completed features or scheduled releases:
 
 - A Red Team chat/upload UI, browser ETL progress and JWT editor.
-- Auto-grading, metrics and CSV reports: `scripts/admin_report.py` is a stub.
-- Lab teardown/cleanup: `scripts/admin_teardown.py` is a stub. No automated
-  deletion/reset workflow is provided.
+- Auto-grading, metrics and CSV reports (planned in EVAL-3).
+- Lab teardown/cleanup; no automated deletion/reset workflow is provided yet
+  (planned in EVAL-3).
 - A reproducible server deployment guide and capacity measurements.
 
 PDF selection and flag placement remain operator-managed. No generated Golden

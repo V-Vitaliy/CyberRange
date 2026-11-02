@@ -91,7 +91,7 @@ docker compose -f docker-compose.compute.yml up -d chromadb
 python -m nltk.downloader punkt_tab
 ```
 
-Ports: PostgreSQL 5432, Redis 6379, Chroma 8000, API 8001, frontend 3000. The current PDF upload flow does not require MinIO: files are stored locally. Its Compose service is retained.
+Ports: PostgreSQL 5432, Redis 6379, Chroma 8000, API 8001, frontend 3000. Uploaded PDFs are stored locally.
 
 On first use, SentenceTransformer downloads `all-mpnet-base-v2`, and tiktoken downloads `cl100k_base` data; the purchased reranker downloads `cross-encoder/ms-marco-MiniLM-L-6-v2`. This requires network access or a populated cache. Groq does not require GGUF.
 
