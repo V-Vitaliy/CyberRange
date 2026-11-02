@@ -9,6 +9,7 @@ from nltk.tokenize import sent_tokenize
 from pypdf import PdfReader
 from redis import Redis
 
+from app.core.config import settings
 from app.db.chroma_client import VectorStore
 
 logging.basicConfig(level=logging.INFO)
@@ -78,6 +79,11 @@ class ETLWorker:
 
         try:
             reader = PdfReader(io.BytesIO(file_content))
+            if len(reader.pages) > settings.PDF_MAX_PAGES:
+                message = f"PDF exceeds the {settings.PDF_MAX_PAGES} page limit"
+                await redis.hset(redis_key, mapping={"status": "Failed", "progress": 100, "message": message})
+                logger.warning("%s: %s", filename, message)
+                return 0
             await redis.hincrby(redis_key, "progress", 5)
             await redis.hset(redis_key, mapping={"status": "Started", "message": "Processing PDF.."})
             extracted_pages = []
