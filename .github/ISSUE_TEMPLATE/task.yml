@@ -1,0 +1,40 @@
+name: Task
+description: A roadmap task with an [AREA-N] ID
+title: "[AREA-N] "
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Also add the matching area:* label.
+      options: [OPS, SEC, ARC, FE, AGT, DET, RED, LAB, EVAL]
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What problem this solves and the intended outcome.
+    validations:
+      required: true
+  - type: textarea
+    id: criteria
+    attributes:
+      label: Acceptance criteria
+      value: |
+        - [ ]
+    validations:
+      required: true
+  - type: textarea
+    id: deliverables
+    attributes:
+      label: Deliverables
+      description: Files, modules or artifacts this task produces.
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Blocking issues (also link them as "blocked by").
+      placeholder: "- Blocked by: #"
