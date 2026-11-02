@@ -9,10 +9,20 @@ logger = logging.getLogger(__name__)
 
 class VectorStore:
     def __init__(self):
+        if not settings.CHROMA_AUTH_TOKEN:
+            raise RuntimeError("CHROMA_AUTH_TOKEN is required: Chroma is reachable only through the token proxy")
         import chromadb
+        from chromadb.config import Settings as ChromaSettings
         from sentence_transformers import SentenceTransformer
 
-        self.client = chromadb.HttpClient(host=settings.CHROMA_HOST, port=settings.CHROMA_PORT)
+        self.client = chromadb.HttpClient(
+            host=settings.CHROMA_HOST,
+            port=settings.CHROMA_PORT,
+            settings=ChromaSettings(
+                chroma_client_auth_provider="chromadb.auth.token_authn.TokenAuthClientProvider",
+                chroma_client_auth_credentials=settings.CHROMA_AUTH_TOKEN,
+            ),
+        )
         model_name = "all-mpnet-base-v2"
         device_type = "cpu"
         logger.info("Loading embedding model %s on %s", model_name, device_type)
