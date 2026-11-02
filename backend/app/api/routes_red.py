@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import uuid
 
@@ -35,6 +36,8 @@ from app.services.etl_worker import ETLWorker
 from app.services.rag_service import generate_chat_response_sse
 from app.services.rate_limiter import enforce_rate_limit
 from app.services.siem_logger import log_security_event
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -292,4 +295,4 @@ async def etl_status_websocket(
                 break
 
     except WebSocketDisconnect:
-        print(f"{task_id} Finished ")
+        logger.debug("ETL status socket for %s closed", task_id)

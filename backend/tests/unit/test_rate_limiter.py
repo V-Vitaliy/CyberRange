@@ -30,3 +30,19 @@ async def test_rate_limit_only_blocks_when_purchased(monkeypatch, enabled):
         await rate_limiter.enforce_rate_limit(object(), redis, session_id, "127.0.0.1")
         redis.incr.assert_not_awaited()
         audit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_block_is_logged_not_printed(monkeypatch, capsys, caplog):
+    session = SimpleNamespace(rate_limit_enabled=True, rate_limit_rpm=1, lab_instance_id=uuid4())
+    monkeypatch.setattr(rate_limiter.GameSessionRepository, "get_by_id", AsyncMock(return_value=session))
+    monkeypatch.setattr(rate_limiter, "log_security_event", AsyncMock())
+    redis = AsyncMock()
+    redis.incr.return_value = 2
+    with caplog.at_level("DEBUG", logger=rate_limiter.logger.name):
+        with pytest.raises(HTTPException):
+            await rate_limiter.enforce_rate_limit(object(), redis, uuid4(), "203.0.113.7")
+    assert capsys.readouterr().out == ""
+    blocked = [record for record in caplog.records if record.levelname == "WARNING"]
+    assert len(blocked) == 1
+    assert "203.0.113.7" in blocked[0].getMessage()

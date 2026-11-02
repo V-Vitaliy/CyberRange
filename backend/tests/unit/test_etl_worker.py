@@ -38,3 +38,16 @@ async def test_etl_rejects_pdf_over_page_limit(monkeypatch):
     assert await worker.process_pdf(b"stub", "large.pdf", uuid4(), redis, uuid4()) == 0
     assert redis.hset.call_args.kwargs["mapping"]["status"] == "Failed"
     worker.vector_store.add_documents.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_etl_failure_reports_generic_status_to_client(monkeypatch, caplog):
+    internal = "Could not connect to tenant default_tenant at chromadb:8000"
+    worker = etl_worker.ETLWorker.__new__(etl_worker.ETLWorker)
+    monkeypatch.setattr(etl_worker, "PdfReader", Mock(side_effect=RuntimeError(internal)))
+    redis = AsyncMock()
+    assert await worker.process_pdf(b"stub", "test.pdf", uuid4(), redis, uuid4()) == 0
+    status = redis.hset.call_args.kwargs["mapping"]
+    assert status["status"] == "Failed"
+    assert status["message"] == etl_worker.ETL_ERROR_MESSAGE
+    assert any(record.exc_info and internal in str(record.exc_info[1]) for record in caplog.records)

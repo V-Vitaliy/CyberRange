@@ -154,3 +154,32 @@ async def test_empty_chat_emits_sse_error_without_saving_success(harness, monkey
     assert "error" in json.loads(parts[0][6:])
     history.assert_not_awaited()
     harness[1].assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_chat_failure_hides_internal_details_from_client(monkeypatch, caplog):
+    internal = "connect to postgresql://cyberadmin:hunter2@10.0.0.5:5432 failed"
+    session = SimpleNamespace(lab_instance_id=uuid4(), use_reranker=False, system_prompt="test")
+    monkeypatch.setattr(rag_service, "get_authorized_session", AsyncMock(return_value=session))
+    monkeypatch.setattr(ChatRepository, "get_or_create_thread", AsyncMock())
+    history = AsyncMock()
+    monkeypatch.setattr(ChatRepository, "append_messages", history)
+
+    async def stream(**kwargs):
+        raise RuntimeError(internal)
+        yield
+
+    monkeypatch.setattr(rag_service, "generate_unified_stream", stream)
+    store = SimpleNamespace(search_documents=Mock(return_value={"documents": [[]]}))
+    user = dict(id=str(uuid4()), sub="student", role="red_team", lab_instance_id=str(session.lab_instance_id))
+    parts = [
+        part
+        async for part in rag_service.generate_chat_response_sse(
+            object(), uuid4(), uuid4(), "question", LLMQueueManager(), store, user, object()
+        )
+    ]
+    assert parts[-1] == "data: [DONE]\n\n"
+    assert json.loads(parts[0][6:]) == {"error": rag_service.CHAT_ERROR_MESSAGE}
+    assert not any(secret in "".join(parts) for secret in ("hunter2", "10.0.0.5", "postgresql"))
+    assert any(internal in record.getMessage() + str(record.exc_info) for record in caplog.records)
+    history.assert_not_awaited()
