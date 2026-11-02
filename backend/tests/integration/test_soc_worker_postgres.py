@@ -31,6 +31,7 @@ class PostgresSocWorkerTests(unittest.IsolatedAsyncioTestCase):
         from app.agents.soc_agent import AnalysisOutput
         from app.core.queue_manager import LLMQueueManager
         from app.db.database import Base
+        from app.db.database import engine as app_engine
         from app.db.models import GameSession, SecurityAuditLog
         from app.services import soc_worker
 
@@ -104,6 +105,7 @@ class PostgresSocWorkerTests(unittest.IsolatedAsyncioTestCase):
         verdict = AnalysisOutput(is_malicious=True, reasoning="late duplicate")
         self.assertFalse(await soc_worker.save_verdict(log_ids[0], verdict))
         await observer.dispose()
+        await app_engine.dispose()
 
 
 if __name__ == "__main__":
