@@ -2,10 +2,11 @@ import re
 from datetime import datetime, timezone
 from uuid import UUID
 
-from app.db.repository import AuditLogRepository, GameSessionRepository
-from app.schemas.blue_team import InvestigateResponse
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.repository import AuditLogRepository, GameSessionRepository
+from app.schemas.blue_team import InvestigateResponse
 
 
 class MLAnalyzer:

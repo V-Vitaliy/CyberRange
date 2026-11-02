@@ -2,6 +2,7 @@ from fastapi import Request
 
 from app.core.config import settings
 
+
 class VectorStore:
     def __init__(self):
         import chromadb

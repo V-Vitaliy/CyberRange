@@ -20,3 +20,4 @@ python-multipart
 pypdf
 nltk
 tiktoken
+ruff

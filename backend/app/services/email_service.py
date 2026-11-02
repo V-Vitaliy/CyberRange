@@ -1,6 +1,7 @@
 import logging
 import smtplib
 from email.message import EmailMessage
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)

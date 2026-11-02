@@ -143,10 +143,11 @@ async def run_setup(options):
     from sqlalchemy import select, text
     from sqlalchemy.engine import make_url
     from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+
     from app.core.config import settings
     from app.core.security import get_password_hash
     from app.db.database import Base
-    from app.db.models import User, GameSession
+    from app.db.models import GameSession, User
 
     url = make_url(settings.DATABASE_URL)
     if url.drivername != "postgresql+asyncpg":

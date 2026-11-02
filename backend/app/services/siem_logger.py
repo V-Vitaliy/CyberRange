@@ -1,8 +1,9 @@
 import logging
 from datetime import datetime
+from typing import Any, Dict, Optional
+
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Dict, Any, Optional
-import uuid
+
 from app.db.models import SecurityAuditLog
 
 logger = logging.getLogger(__name__)

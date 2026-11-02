@@ -1,14 +1,15 @@
-import uuid
 import datetime
-from typing import List, Optional, Dict, Any
+import uuid
+from typing import List, Optional
 
+from fastapi import HTTPException
+from sqlalchemy import desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import desc, func
 from sqlalchemy.orm.attributes import flag_modified
-from fastapi import HTTPException
 
-from app.db.models import User, GameSession, SecurityAuditLog, ChatThread, CtfFlag, CtfSubmission
+from app.db.models import ChatThread, CtfFlag, CtfSubmission, GameSession, SecurityAuditLog, User
+
 
 def ensure_uuid(val: str | uuid.UUID) -> uuid.UUID:
     if isinstance(val, uuid.UUID):
@@ -148,7 +149,7 @@ class AuditLogRepository:
         total_res = await db.execute(select(func.count(SecurityAuditLog.id)).where(SecurityAuditLog.lab_instance_id == lab_uuid))
         total_logs = total_res.scalar() or 0
 
-        comp_res = await db.execute(select(func.count(SecurityAuditLog.id)).where(SecurityAuditLog.lab_instance_id == lab_uuid, SecurityAuditLog.is_compromised == True))
+        comp_res = await db.execute(select(func.count(SecurityAuditLog.id)).where(SecurityAuditLog.lab_instance_id == lab_uuid, SecurityAuditLog.is_compromised.is_(True)))
         compromised_logs = comp_res.scalar() or 0
 
         pend_res = await db.execute(select(func.count(SecurityAuditLog.id)).where(SecurityAuditLog.lab_instance_id == lab_uuid, SecurityAuditLog.investigated_at.is_(None)))

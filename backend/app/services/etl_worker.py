@@ -1,13 +1,13 @@
 import io
-import uuid
 import logging
-from typing import List,Callable
-from redis import Redis
+import uuid
+from typing import List
 from uuid import UUID
-from pypdf import PdfReader
-import nltk
-from nltk.tokenize import sent_tokenize
+
 import tiktoken
+from nltk.tokenize import sent_tokenize
+from pypdf import PdfReader
+from redis import Redis
 
 from app.db.chroma_client import VectorStore
 

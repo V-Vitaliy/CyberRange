@@ -3,14 +3,14 @@ import json
 import re
 from uuid import UUID
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.llm_engine import generate_unified_stream
-from app.core.security import get_authorized_session
 from app.core.prompt_builder import PromptBuilder
 from app.core.queue_manager import LLMQueueManager
+from app.core.security import get_authorized_session
 from app.db.chroma_client import VectorStore
 from app.db.repository import ChatRepository
-from app.db.repository import GameSessionRepository
-from sqlalchemy.ext.asyncio import AsyncSession
 
 _reranker = None
 

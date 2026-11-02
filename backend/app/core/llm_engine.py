@@ -4,16 +4,16 @@ import logging
 import os
 import uuid
 
-from app.core.config import settings
-from app.core.queue_manager import LLMQueueManager
-from app.core.tools import send_email
-from app.services.email_service import EmailService
 from fastapi import Request
 from langchain_community.chat_models import ChatLlamaCpp
-from langchain_core.messages import HumanMessage,SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
+from app.core.tools import send_email
+from app.services.email_service import EmailService
 from app.services.siem_logger import log_security_event
 
 logger = logging.getLogger(__name__)

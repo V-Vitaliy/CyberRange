@@ -1,24 +1,25 @@
 from datetime import timedelta
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.security import create_access_token, get_authorized_session, get_blue_team_user, verify_password
 from app.db.database import get_db
-from app.core.security import verify_password, create_access_token, get_blue_team_user, get_authorized_session
-from app.services.forensics import process_investigation
-from app.services.defense import process_defense_purchase
 from app.db.models import User
+from app.db.repository import AuditLogRepository, GameSessionRepository, UserRepository
 from app.schemas.blue_team import (
-    LoginRequest, TokenResponse,
-    BuyDefenseRequest, BuyDefenseResponse,
-    InvestigateRequest, InvestigateResponse,
-    DashboardStatsResponse, AuditLogEntry
+    AuditLogEntry,
+    BuyDefenseRequest,
+    BuyDefenseResponse,
+    DashboardStatsResponse,
+    InvestigateRequest,
+    InvestigateResponse,
+    LoginRequest,
+    TokenResponse,
 )
-from app.db.repository import (
-    UserRepository,
-    GameSessionRepository,
-    AuditLogRepository
-)
+from app.services.defense import process_defense_purchase
+from app.services.forensics import process_investigation
 
 router = APIRouter()
 

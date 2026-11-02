@@ -69,9 +69,9 @@ async def test_reranker_switch_and_system_prompt_reach_generation(monkeypatch, e
 
 @pytest.mark.asyncio
 async def test_chat_sse_records_simulated_tool_result_and_history(harness, monkeypatch):
-    from app.services import rag_service
-    from app.db.repository import ChatRepository
     from app.core.queue_manager import LLMQueueManager
+    from app.db.repository import ChatRepository
+    from app.services import rag_service
 
     audit, delivery = harness
     lab_id = uuid4()
@@ -101,9 +101,9 @@ async def test_chat_sse_records_simulated_tool_result_and_history(harness, monke
 @pytest.mark.asyncio
 @pytest.mark.parametrize('finish_reason', ['stop', 'length'])
 async def test_empty_chat_emits_sse_error_without_saving_success(harness, monkeypatch, finish_reason):
-    from app.services import rag_service
-    from app.db.repository import ChatRepository
     from app.core.queue_manager import LLMQueueManager
+    from app.db.repository import ChatRepository
+    from app.services import rag_service
 
     lab_id = uuid4()
     session = SimpleNamespace(lab_instance_id=lab_id, use_reranker=False, system_prompt='test')

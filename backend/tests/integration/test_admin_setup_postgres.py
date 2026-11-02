@@ -5,14 +5,13 @@ CYBERRANGE_SETUP_TEST_DATABASE_URL and CYBERRANGE_SETUP_TEST_DATABASE_NAME.
 No containers, database creation, teardown, or external model calls.
 """
 import asyncio
-from datetime import datetime, timezone
 import os
-from pathlib import Path
 import secrets
 import sys
 import unittest
+from datetime import datetime, timezone
+from pathlib import Path
 from uuid import UUID, uuid4
-
 
 ROOT = Path(__file__).resolve().parents[3]
 TEST_URL = os.environ.get("CYBERRANGE_SETUP_TEST_DATABASE_URL")
@@ -33,12 +32,13 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
         from sqlalchemy.engine import make_url
         from sqlalchemy.exc import DBAPIError
         from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-        from app.core.security import verify_password
-        from app.db.database import Base, engine as app_engine
+
+        from app.core.security import get_password_hash, verify_password
+        from app.db.database import Base
+        from app.db.database import engine as app_engine
         from app.db.models import ChatThread, GameSession, SecurityAuditLog, User
         from app.main import app
         from scripts.admin_setup import Options, SqlStore, seed_transaction
-        from app.core.security import get_password_hash
 
         url = make_url(TEST_URL)
         self.assertEqual(url.drivername, "postgresql+asyncpg")
