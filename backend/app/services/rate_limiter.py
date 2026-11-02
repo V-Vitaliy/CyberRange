@@ -1,3 +1,4 @@
+import logging
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -7,25 +8,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.repository import GameSessionRepository
 from app.services.siem_logger import log_security_event
 
+logger = logging.getLogger(__name__)
+
 
 async def enforce_rate_limit(db: AsyncSession, redis: Redis, session_id: UUID, client_ip: str) -> None:
     session = await GameSessionRepository.get_by_id(db, session_id)
 
     if not session or not session.rate_limit_enabled:
-        print(f"DEBUG: Rate limit disabled or session {session_id} not found.")
+        logger.debug("Rate limit disabled or session %s not found", session_id)
         return
 
     redis_key = f"rate_limit:{session_id}:{client_ip}"
 
     current_requests = await redis.incr(redis_key)
 
-    print(f"DEBUG: IP {client_ip} has {current_requests} requests. Limit: {session.rate_limit_rpm}")
+    logger.debug("IP %s has %s requests; limit %s", client_ip, current_requests, session.rate_limit_rpm)
 
     if current_requests == 1:
         await redis.expire(redis_key, 60)
 
     if current_requests > session.rate_limit_rpm:
-        print(f"DEBUG: IP {client_ip} BLOCKED!")
+        logger.warning("Rate limit exceeded for IP %s in session %s", client_ip, session_id)
 
         # Log the DoS attempt into SIEM
         await log_security_event(

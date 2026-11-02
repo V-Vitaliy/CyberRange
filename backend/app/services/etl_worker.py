@@ -15,6 +15,8 @@ from app.db.chroma_client import VectorStore
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+ETL_ERROR_MESSAGE = "Document processing failed."
+
 
 class ETLWorker:
     def __init__(self, vector_store: VectorStore):
@@ -163,9 +165,10 @@ class ETLWorker:
             logger.info(f"Successfully finished ETL for {filename}.")
             return len(chunks)
 
-        except Exception as e:
+        except Exception:
             await redis.hset(
-                redis_key, mapping={"filename": filename, "status": "Failed", "progress": 100, "message": str(e)}
+                redis_key,
+                mapping={"filename": filename, "status": "Failed", "progress": 100, "message": ETL_ERROR_MESSAGE},
             )
-            logger.error(f"ETL pipeline failed for {filename}: {str(e)}", exc_info=True)
+            logger.exception("ETL pipeline failed for %s", filename)
             return 0

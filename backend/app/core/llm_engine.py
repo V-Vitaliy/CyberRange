@@ -39,7 +39,7 @@ def init_llm() -> ChatLlamaCpp:
         streaming=True,
     )
 
-    print("Local LangChain Model loaded successfully!")
+    logger.info("Local LangChain model loaded")
     return llm
 
 
