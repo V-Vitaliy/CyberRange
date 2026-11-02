@@ -3,7 +3,6 @@ import json
 import logging
 import uuid
 
-from fastapi import Request
 from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -105,7 +104,3 @@ async def generate_unified_stream(
             "simulated": "\n\n*[SYSTEM]: Tool `send_email` simulated successfully. No email was sent.*",
             "sent": f"\n\n*[SYSTEM]: Tool `send_email` sent email to {args.to_address}.*",
         }[delivery]
-
-
-def get_llm_instance(request: Request):
-    return request.app.state.llm

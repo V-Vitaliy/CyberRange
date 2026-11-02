@@ -1,6 +1,7 @@
 """Model selection and initialization; adapters are built without network or weights."""
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -67,3 +68,9 @@ def test_http_provider_requires_explicit_endpoint_and_model(monkeypatch, url, mo
     monkeypatch.setattr(provider.settings, "LLM_MODEL", model)
     with pytest.raises(ValueError, match="LLM_BASE_URL and LLM_MODEL must be nonempty"):
         provider.init_openai_compatible()
+
+
+def test_request_dependency_returns_application_model():
+    model = object()
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(llm=model)))
+    assert provider.get_llm_instance(request) is model

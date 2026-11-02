@@ -16,6 +16,7 @@ from app.db.database import get_db
 from app.db.repository import ChatRepository, GameSessionRepository
 from app.db.sqli_isolation import IsolationError
 from app.db.sqli_search import HistoryQueryError
+from app.llm import provider
 from app.main import app, red_app
 
 
@@ -311,3 +312,9 @@ async def test_etl_socket_rejects_foreign_job(monkeypatch):
     await routes_red.etl_status_websocket(socket, uuid4(), redis, object())
     socket.close.assert_awaited_once_with(code=1008)
     socket.accept.assert_not_awaited()
+
+
+def test_chat_route_takes_model_from_provider_dependency():
+    route = next(route for route in routes_red.router.routes if route.path == "/chat/ask")
+    calls = [dependency.call for dependency in route.dependant.dependencies]
+    assert provider.get_llm_instance in calls

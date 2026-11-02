@@ -22,7 +22,6 @@ from redis import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.llm_engine import get_llm_instance
 from app.core.queue_manager import LLMQueueManager, get_queue_manager
 from app.core.redis_client import get_redis
 from app.core.security import create_access_token, get_authorized_session, get_current_user_vulnerable, verify_password
@@ -31,6 +30,7 @@ from app.db.database import get_db
 from app.db.repository import ChatRepository, UserRepository
 from app.db.sqli_isolation import IsolationError
 from app.db.sqli_search import HistoryQueryError
+from app.llm.provider import get_llm_instance
 from app.schemas.red_team import ChatRequest, LoginRequest
 from app.services.etl_worker import ETLWorker
 from app.services.rag_service import generate_chat_response_sse
