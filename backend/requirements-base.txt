@@ -16,6 +16,7 @@ aiofiles
 sentence_transformers
 asyncpg
 python-multipart
+httpx
 tiktoken
 langchain
 langchain-core
