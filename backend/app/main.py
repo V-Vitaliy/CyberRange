@@ -11,9 +11,9 @@ from app.api.routes_blue import router as blue_router
 from app.api.routes_ctf import router as ctf_router
 from app.api.routes_red import router as red_router
 from app.core.config import require_strong_jwt_secret, settings
-from app.core.llm_engine import init_groq, init_llm, init_openai_compatible
 from app.core.queue_manager import LLMQueueManager
 from app.db.chroma_client import VectorStore
+from app.llm.provider import create_llm
 from app.services.soc_worker import run_soc_analyst_loop
 
 # 2. Sub-application for Red Team Docs
@@ -40,12 +40,7 @@ async def lifespan(app: FastAPI):
     queue_manager = LLMQueueManager()
     vector_store = VectorStore()
 
-    if settings.LLM_PROVIDER == "openai_compatible":
-        llm_instance = init_openai_compatible()
-    elif settings.GROQ_API_KEY:
-        llm_instance = init_groq()
-    else:
-        llm_instance = init_llm()
+    llm_instance = create_llm()
 
     app.state.llm = llm_instance
     app.state.queue_manager = queue_manager

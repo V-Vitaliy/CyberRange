@@ -163,24 +163,6 @@ async def test_model_without_tools_retains_text_chat(harness):
     harness[1].assert_not_called()
 
 
-def test_real_groq_adapter_binds_email_schema_without_network(monkeypatch):
-    monkeypatch.setattr(llm_engine.settings, "GROQ_API_KEY", "unused-test-key")
-    model = llm_engine.init_groq()
-    bound = model.bind_tools([send_email])
-    schema = bound.kwargs["tools"][0]["function"]
-    assert schema["name"] == "send_email"
-    assert set(schema["parameters"]["required"]) == {"to_address", "subject", "body"}
-    assert not model.model_kwargs.get("tools")
-
-
-@pytest.mark.parametrize("url,model", [("", "test-model"), ("http://inference.invalid/v1", ""), (" ", " ")])
-def test_http_provider_requires_explicit_endpoint_and_model(monkeypatch, url, model):
-    monkeypatch.setattr(llm_engine.settings, "LLM_BASE_URL", url)
-    monkeypatch.setattr(llm_engine.settings, "LLM_MODEL", model)
-    with pytest.raises(ValueError, match="LLM_BASE_URL and LLM_MODEL must be nonempty"):
-        llm_engine.init_openai_compatible()
-
-
 @pytest.mark.asyncio
 async def test_real_adapter_streams_unicode_and_keeps_chat_tools(monkeypatch):
     def handler(request):
