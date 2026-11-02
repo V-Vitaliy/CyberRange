@@ -60,6 +60,8 @@ class Settings(BaseSettings):
     # Chromadb
     CHROMA_HOST: str = "localhost"
     CHROMA_PORT: int = 8000
+    # Bearer token checked by the Envoy proxy in front of Chroma.
+    CHROMA_AUTH_TOKEN: str = ""
 
     # Postgres
     # Credentials come only from the environment or .env.
