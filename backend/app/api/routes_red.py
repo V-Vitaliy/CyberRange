@@ -46,7 +46,7 @@ router = APIRouter()
 async def red_team_login(login_req: LoginRequest, db: AsyncSession = Depends(get_db)):
     user = await UserRepository.get_by_username(db, login_req.username)
 
-    if not user or not verify_password(login_req.password, user.password_hash):
+    if not user or not await asyncio.to_thread(verify_password, login_req.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     if user.role != "red_team":
