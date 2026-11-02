@@ -38,12 +38,35 @@ async def test_invalid_soc_response_is_an_error(response):
 
 @pytest.mark.asyncio
 async def test_soc_worker_keeps_failed_log_pending_and_processes_next(monkeypatch):
-    logs = [
-        SecurityAuditLog(id=uuid4(), event_type="test", payload={}, is_compromised=True),
-        SecurityAuditLog(id=uuid4(), event_type="test", payload={}, is_compromised=False),
-    ]
+    failed, analyzed = uuid4(), uuid4()
+    monkeypatch.setattr(
+        soc_worker,
+        "fetch_pending_logs",
+        AsyncMock(return_value=[(failed, "test", {}), (analyzed, "test", {"prompt": "hello"})]),
+    )
+    save = AsyncMock(return_value=True)
+    monkeypatch.setattr(soc_worker, "save_verdict", save)
+    # Stop after one batch without sleeping or contacting any service.
+    monkeypatch.setattr(soc_worker.asyncio, "sleep", AsyncMock(side_effect=asyncio.CancelledError))
+    graph = SimpleNamespace(
+        ainvoke=AsyncMock(side_effect=[RuntimeError("LLM unavailable"), {"is_malicious": False, "reasoning": "normal"}])
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await soc_worker.run_soc_analyst_loop(graph, LLMQueueManager())
+    save.assert_awaited_once_with(analyzed, AnalysisOutput(is_malicious=False, reasoning="normal"))
+    assert graph.ainvoke.call_args.args[0]["payload"] == str({"prompt": "hello"})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("already_investigated", [False, True])
+async def test_save_verdict_writes_only_pending_log(monkeypatch, already_investigated):
+    log = SecurityAuditLog(id=uuid4(), event_type="test", payload={"prompt": "x"}, is_compromised=False)
     db = SimpleNamespace(
-        execute=AsyncMock(return_value=Mock(scalars=Mock(return_value=Mock(all=Mock(return_value=logs))))),
+        execute=AsyncMock(
+            return_value=Mock(
+                scalars=Mock(return_value=Mock(first=Mock(return_value=None if already_investigated else log)))
+            )
+        ),
         commit=AsyncMock(),
     )
 
@@ -52,19 +75,15 @@ async def test_soc_worker_keeps_failed_log_pending_and_processes_next(monkeypatc
         yield db
 
     monkeypatch.setattr(soc_worker, "async_session", session)
-    # Stop after one batch without sleeping or contacting any service.
-    monkeypatch.setattr(soc_worker.asyncio, "sleep", AsyncMock(side_effect=asyncio.CancelledError))
-    graph = SimpleNamespace(
-        ainvoke=AsyncMock(side_effect=[RuntimeError("LLM unavailable"), {"is_malicious": False, "reasoning": "normal"}])
-    )
-    with pytest.raises(asyncio.CancelledError):
-        await soc_worker.run_soc_analyst_loop(graph, LLMQueueManager())
-    assert logs[0].investigated_at is None
-    assert logs[0].is_compromised is True
-    assert logs[0].payload == {}
-    assert logs[1].investigated_at is not None
-    assert logs[1].payload["soc_reasoning"] == "normal"
-    db.commit.assert_awaited_once()
+    saved = await soc_worker.save_verdict(log.id, AnalysisOutput(is_malicious=True, reasoning="attack"))
+    assert saved is not already_investigated
+    if already_investigated:
+        db.commit.assert_not_awaited()
+    else:
+        assert log.is_compromised is True
+        assert log.investigated_at is not None
+        assert log.payload == {"prompt": "x", "soc_reasoning": "attack"}
+        db.commit.assert_awaited_once()
 
 
 @pytest.mark.asyncio

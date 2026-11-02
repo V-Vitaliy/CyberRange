@@ -74,6 +74,15 @@ jobs:
           python backend/tests/integration/test_sqli_isolation_postgres.py -v 2>&1 | tee result.txt
           ! grep -qi skipped result.txt
 
+      - name: PostgreSQL SOC worker check
+        env:
+          CYBERRANGE_SOC_TEST_DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+          CYBERRANGE_SOC_TEST_DATABASE_NAME: cyberrange_test
+        # Fail instead of passing silently if the check skips itself.
+        run: |
+          python backend/tests/integration/test_soc_worker_postgres.py -v 2>&1 | tee result.txt
+          ! grep -qi skipped result.txt
+
   compose-isolation:
     runs-on: ubuntu-latest
     steps:
