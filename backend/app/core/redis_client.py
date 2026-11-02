@@ -1,4 +1,5 @@
 import redis.asyncio as redis
+
 from app.core.config import settings
 
 REDIS_URL = getattr(settings, "REDIS_URL", "redis://localhost:6379")

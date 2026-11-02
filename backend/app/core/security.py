@@ -3,13 +3,15 @@ from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import jwt
-from app.core.config import settings
-from app.db.database import get_db
-from app.db.models import User
-from app.db.repository import UserRepository, GameSessionRepository, ensure_uuid
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
+from app.db.database import get_db
+from app.db.models import User
+from app.db.repository import GameSessionRepository, UserRepository, ensure_uuid
+
 
 # ---------------------------------------------------------
 #  Hashing Utilities

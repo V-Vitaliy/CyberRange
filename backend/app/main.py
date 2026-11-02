@@ -1,19 +1,19 @@
-from contextlib import asynccontextmanager
 import asyncio
 import logging
-from contextlib import suppress
+from contextlib import asynccontextmanager, suppress
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.core.queue_manager import LLMQueueManager
-from app.db.chroma_client import VectorStore
-from app.api.routes_red import router as red_router
-from app.api.routes_ctf import router as ctf_router
+from app.agents.soc_agent import create_soc_graph
 from app.api.routes_blue import router as blue_router
+from app.api.routes_ctf import router as ctf_router
+from app.api.routes_red import router as red_router
 from app.core.config import settings
 from app.core.llm_engine import init_groq, init_llm, init_openai_compatible
+from app.core.queue_manager import LLMQueueManager
+from app.db.chroma_client import VectorStore
 from app.services.soc_worker import run_soc_analyst_loop
-from app.agents.soc_agent import create_soc_graph
 
 # 2. Sub-application for Red Team Docs
 red_app = FastAPI(

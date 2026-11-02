@@ -1,9 +1,11 @@
 from uuid import UUID
-from app.db.repository import GameSessionRepository
-from app.services.siem_logger import log_security_event
+
 from fastapi import HTTPException
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.repository import GameSessionRepository
+from app.services.siem_logger import log_security_event
 
 
 async def enforce_rate_limit(

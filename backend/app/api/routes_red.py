@@ -1,34 +1,39 @@
-import os
-import aiofiles
 import asyncio
-from redis import Redis
+import os
 import uuid
-from fastapi import APIRouter, Depends, Request, Query, HTTPException, UploadFile, File, WebSocket, WebSocketDisconnect, status, BackgroundTasks
+
+import aiofiles
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from fastapi.responses import StreamingResponse
-from sqlalchemy import text, select
+from redis import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.queue_manager import LLMQueueManager, get_queue_manager
-from app.db.database import get_db
-from app.db.chroma_client import VectorStore, get_vector_store
-from app.core.security import (
-    get_current_user_vulnerable,
-    get_authorized_session,
-    verify_password,
-    create_access_token
-)
-from app.services.rag_service import generate_chat_response_sse
-from app.schemas.red_team import ChatRequest, LoginRequest
-from app.services.etl_worker import ETLWorker
-from app.core.redis_client import get_redis
-from app.services.rate_limiter import enforce_rate_limit
-from app.services.siem_logger import log_security_event
 from app.core.llm_engine import get_llm_instance
-from app.db.repository import UserRepository
-
-from app.db.repository import ChatRepository
+from app.core.queue_manager import LLMQueueManager, get_queue_manager
+from app.core.redis_client import get_redis
+from app.core.security import create_access_token, get_authorized_session, get_current_user_vulnerable, verify_password
+from app.db.chroma_client import VectorStore, get_vector_store
+from app.db.database import get_db
+from app.db.repository import ChatRepository, UserRepository
 from app.db.sqli_isolation import IsolationError
 from app.db.sqli_search import HistoryQueryError
+from app.schemas.red_team import ChatRequest, LoginRequest
+from app.services.etl_worker import ETLWorker
+from app.services.rag_service import generate_chat_response_sse
+from app.services.rate_limiter import enforce_rate_limit
+from app.services.siem_logger import log_security_event
 
 router = APIRouter()
 

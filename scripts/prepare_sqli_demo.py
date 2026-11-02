@@ -6,11 +6,10 @@ Does not run attack checks, reset data, or modify existing labs.
 import asyncio
 import json
 import os
-from pathlib import Path
 import secrets
 import sys
+from pathlib import Path
 from uuid import uuid4
-
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE = ROOT / '.local-sqli59' / 'connections.json'
@@ -21,6 +20,7 @@ async def prepare():
     from sqlalchemy import event, text
     from sqlalchemy.engine import make_url
     from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+
     from app.core.config import settings
     from app.db.database import Base
     from app.db.models import ChatThread, GameSession, SecurityAuditLog, User

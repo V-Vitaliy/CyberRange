@@ -4,8 +4,8 @@ import asyncio
 import getpass
 import json
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 from uuid import UUID
 
 
@@ -13,6 +13,7 @@ async def run(lab_id, password):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'backend'))
     from sqlalchemy.engine import make_url
     from sqlalchemy.ext.asyncio import create_async_engine
+
     from app.core.config import settings
     from app.db.sqli_isolation import IsolationError, provision_lab
 

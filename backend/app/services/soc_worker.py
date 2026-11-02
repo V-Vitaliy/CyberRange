@@ -1,13 +1,13 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
+
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.db.database import async_session
-from app.db.models import SecurityAuditLog, GameSession
 from app.agents.soc_agent import AnalysisOutput
+from app.db.database import async_session
+from app.db.models import GameSession, SecurityAuditLog
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ async def run_soc_analyst_loop(soc_graph, queue):
                     .join(GameSession, SecurityAuditLog.lab_instance_id == GameSession.lab_instance_id)
                     .where(
                         SecurityAuditLog.investigated_at.is_(None),
-                        GameSession.is_solo == True
+                        GameSession.is_solo.is_(True)
                     )
                     .order_by(SecurityAuditLog.timestamp)
                     .with_for_update(skip_locked=True, of=SecurityAuditLog)

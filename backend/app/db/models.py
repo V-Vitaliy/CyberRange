@@ -1,8 +1,9 @@
-from sqlalchemy import Column, Integer, String, Boolean, Text, DateTime, ForeignKey
-from sqlalchemy.orm import declarative_base
-from sqlalchemy.sql import func
-from sqlalchemy.dialects.postgresql import UUID, JSONB
 import uuid
+
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.sql import func
+
 from app.db.database import Base
 
 

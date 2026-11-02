@@ -7,13 +7,12 @@ Run separately with the repository's Python environment.
 import asyncio
 import json
 import os
-from pathlib import Path
 import secrets
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 from uuid import uuid4
-
 
 TEST_URL = os.environ.get('CYBERRANGE_SQLI_TEST_DATABASE_URL')
 TEST_NAME = os.environ.get('CYBERRANGE_SQLI_TEST_DATABASE_NAME')
@@ -29,11 +28,16 @@ class PostgresIsolationTests(unittest.IsolatedAsyncioTestCase):
         from sqlalchemy.engine import make_url
         from sqlalchemy.exc import DBAPIError
         from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-        from app.db.database import Base, engine as app_engine
+
         from app.core.config import settings
+        from app.db.database import Base
+        from app.db.database import engine as app_engine
         from app.db.models import ChatThread, GameSession, SecurityAuditLog, User
         from app.db.sqli_isolation import (
-            IsolationError, LabObjects, check_reader_boundary, provision_lab,
+            IsolationError,
+            LabObjects,
+            check_reader_boundary,
+            provision_lab,
         )
 
         asyncio.get_running_loop().set_debug(False)
@@ -152,8 +156,10 @@ class PostgresIsolationTests(unittest.IsolatedAsyncioTestCase):
 
             # Full mounted HTTP route, actual auth/repositories/SQL/SIEM. There
             # are no service mocks, dependency overrides, external HTTP or lifespan.
-            import httpx
             from unittest.mock import patch
+
+            import httpx
+
             from app.core.security import create_access_token
             from app.main import app, red_app
             self.assertFalse(red_app.dependency_overrides)

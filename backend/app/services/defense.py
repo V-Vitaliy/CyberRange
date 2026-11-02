@@ -1,10 +1,10 @@
 from uuid import UUID
 
-from app.db.models import GameSession
-from app.db.repository import GameSessionRepository
-from app.schemas.blue_team import BuyDefenseResponse
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.repository import GameSessionRepository
+from app.schemas.blue_team import BuyDefenseResponse
 
 # Pricing catalog for defense mechanisms (according to specification)
 DEFENSE_PRICING = {
