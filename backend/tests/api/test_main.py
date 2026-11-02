@@ -183,3 +183,18 @@ async def test_declared_oversized_body_is_rejected_before_routing(client, monkey
     monkeypatch.setattr(main.settings, "UPLOAD_MAX_BYTES", 1)
     response = await client.post("/api/red/upload", content=b"x" * (main.MULTIPART_OVERHEAD_BYTES + 2))
     assert response.status_code == 413
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "origin,allowed",
+    [("http://localhost:3000", True), ("http://127.0.0.1:3000", True), ("http://evil.example", False)],
+)
+async def test_cors_allows_only_configured_frontend_origins(client, origin, allowed):
+    preflight = await client.options(
+        "/api/blue/login",
+        headers={"Origin": origin, "Access-Control-Request-Method": "POST"},
+    )
+    simple = await client.get("/api/health", headers={"Origin": origin})
+    for response in (preflight, simple):
+        assert response.headers.get("access-control-allow-origin") == (origin if allowed else None)

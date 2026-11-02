@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     PDF_MAX_PAGES: int = Field(default=200, gt=0)
     PROMPT_MAX_CHARS: int = Field(default=4000, gt=0)
 
+    # Browser origins allowed to call the API with credentials (JSON list in .env).
+    FRONTEND_ORIGINS: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+
     # LLM Hardware Optimizations (Defaults based on g4dn.xlarge / RTX 3060)
     LLM_MODEL_PATH: str = "../../models/Meta-Llama-3-8B.Q4_K_M.gguf"
 

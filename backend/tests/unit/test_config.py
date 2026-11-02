@@ -98,3 +98,10 @@ def test_weak_or_published_jwt_secret_is_rejected(secret):
 
 def test_random_jwt_secret_is_accepted():
     require_strong_jwt_secret("a" * 32)
+
+
+def test_frontend_origins_default_to_local_dev_server_and_can_be_overridden(monkeypatch):
+    monkeypatch.delenv("FRONTEND_ORIGINS", raising=False)
+    assert Settings(_env_file=None).FRONTEND_ORIGINS == ["http://localhost:3000", "http://127.0.0.1:3000"]
+    monkeypatch.setenv("FRONTEND_ORIGINS", '["https://range.example"]')
+    assert Settings(_env_file=None).FRONTEND_ORIGINS == ["https://range.example"]

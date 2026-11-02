@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import re
 from uuid import UUID
 
@@ -11,6 +12,10 @@ from app.core.queue_manager import LLMQueueManager
 from app.core.security import get_authorized_session
 from app.db.chroma_client import VectorStore
 from app.db.repository import ChatRepository
+
+logger = logging.getLogger(__name__)
+
+CHAT_ERROR_MESSAGE = "The assistant could not answer. Please try again."
 
 _reranker = None
 
@@ -93,7 +98,8 @@ async def generate_chat_response_sse(
 
         await ChatRepository.append_messages(db=db, thread_id=thread_id, prompt=prompt, ai_response=full_ai_response)
 
-    except Exception as e:
-        yield f"data: {json.dumps({'error': str(e)})}\n\n"
+    except Exception:
+        logger.exception("Chat response failed for session %s", session_id)
+        yield f"data: {json.dumps({'error': CHAT_ERROR_MESSAGE})}\n\n"
     finally:
         yield "data: [DONE]\n\n"
