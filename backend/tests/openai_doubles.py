@@ -4,21 +4,21 @@ import json
 
 import httpx
 
-from app.core import llm_engine
+from app.llm import provider
 
 
 def make_model(monkeypatch, handler):
-    monkeypatch.setattr(llm_engine.settings, "LLM_BASE_URL", "http://local.invalid/v1")
-    monkeypatch.setattr(llm_engine.settings, "LLM_MODEL", "test-model")
-    monkeypatch.setattr(llm_engine.settings, "LLM_API_KEY", "")
-    monkeypatch.setattr(llm_engine.settings, "LLM_MAX_TOKENS", 3072)
-    original = llm_engine.ChatOpenAI
+    monkeypatch.setattr(provider.settings, "LLM_BASE_URL", "http://local.invalid/v1")
+    monkeypatch.setattr(provider.settings, "LLM_MODEL", "test-model")
+    monkeypatch.setattr(provider.settings, "LLM_API_KEY", "")
+    monkeypatch.setattr(provider.settings, "LLM_MAX_TOKENS", 3072)
+    original = provider.ChatOpenAI
 
     def adapter(**kwargs):
         return original(**kwargs, http_async_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
 
-    monkeypatch.setattr(llm_engine, "ChatOpenAI", adapter)
-    return llm_engine.init_openai_compatible()
+    monkeypatch.setattr(provider, "ChatOpenAI", adapter)
+    return provider.init_openai_compatible()
 
 
 def assert_request(request, stream=True):
