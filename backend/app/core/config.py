@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     UPLOAD_MAX_BYTES: int = Field(default=10 * 1024 * 1024, gt=0)
     PDF_MAX_PAGES: int = Field(default=200, gt=0)
     PROMPT_MAX_CHARS: int = Field(default=4000, gt=0)
+    # Threads for PDF parsing and embedding, separate from the pool serving requests.
+    ETL_MAX_WORKERS: int = Field(default=2, gt=0)
 
     # Browser origins allowed to call the API with credentials (JSON list in .env).
     FRONTEND_ORIGINS: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]

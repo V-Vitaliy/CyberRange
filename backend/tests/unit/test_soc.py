@@ -135,3 +135,88 @@ async def test_soc_requires_valid_schema_tool_output(monkeypatch, arguments):
     else:
         with pytest.raises((ValueError, TypeError)):
             await graph.ainvoke(state)
+
+
+@pytest.mark.asyncio
+async def test_soc_worker_backs_off_quietly_while_llm_is_unreachable(monkeypatch, caplog):
+    from langchain_core.exceptions import ModelConnectionError
+
+    events = [(uuid4(), "test", {}) for _ in range(3)]
+    monkeypatch.setattr(soc_worker, "fetch_pending_logs", AsyncMock(return_value=events))
+    save = AsyncMock(return_value=True)
+    monkeypatch.setattr(soc_worker, "save_verdict", save)
+    verdict = {"is_malicious": False, "reasoning": "normal"}
+    outage = [ModelConnectionError("Connection error.")] * 6
+    graph = SimpleNamespace(ainvoke=AsyncMock(side_effect=outage + [verdict] * 3))
+    delays = []
+
+    async def sleep(seconds):
+        delays.append(seconds)
+        if len(delays) == 7:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(soc_worker.asyncio, "sleep", sleep)
+    with caplog.at_level("INFO", logger=soc_worker.logger.name):
+        with pytest.raises(asyncio.CancelledError):
+            await soc_worker.run_soc_analyst_loop(graph, LLMQueueManager())
+
+    # One attempt per poll while down, doubling delay capped at the maximum, reset after recovery.
+    assert graph.ainvoke.await_count == 9
+    assert delays == [5, 10, 20, 40, 60, 60, 5]
+    assert save.await_count == 3
+    warnings = [record for record in caplog.records if record.levelname == "WARNING"]
+    assert len(warnings) == 1
+    assert "unreachable" in warnings[0].getMessage() and warnings[0].exc_info is None
+    assert not [record for record in caplog.records if record.levelname == "ERROR"]
+    assert any("reachable again" in record.getMessage() for record in caplog.records)
+
+
+def _wrapped_os_error():
+    try:
+        raise OSError("All connection attempts failed")
+    except OSError as cause:
+        try:
+            raise RuntimeError("model call failed") from cause
+        except RuntimeError as error:
+            return error
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error",
+    [ConnectionRefusedError("refused"), _wrapped_os_error()],
+    ids=["refused", "wrapped-os-error"],
+)
+async def test_soc_worker_treats_any_connection_failure_as_outage(monkeypatch, caplog, error):
+    events = [(uuid4(), "test", {}) for _ in range(2)]
+    monkeypatch.setattr(soc_worker, "fetch_pending_logs", AsyncMock(return_value=events))
+    monkeypatch.setattr(soc_worker, "save_verdict", AsyncMock(return_value=True))
+    graph = SimpleNamespace(ainvoke=AsyncMock(side_effect=error))
+    monkeypatch.setattr(soc_worker.asyncio, "sleep", AsyncMock(side_effect=[None, asyncio.CancelledError]))
+    with pytest.raises(asyncio.CancelledError):
+        await soc_worker.run_soc_analyst_loop(graph, LLMQueueManager())
+    assert graph.ainvoke.await_count == 2
+    assert [call.args[0] for call in soc_worker.asyncio.sleep.await_args_list] == [5, 10]
+    assert not [record for record in caplog.records if record.levelname == "ERROR"]
+
+
+@pytest.mark.asyncio
+async def test_soc_outage_mid_batch_keeps_saved_verdicts_and_stops_batch(monkeypatch):
+    from langchain_core.exceptions import ModelConnectionError
+
+    first, second, third = uuid4(), uuid4(), uuid4()
+    monkeypatch.setattr(
+        soc_worker,
+        "fetch_pending_logs",
+        AsyncMock(return_value=[(first, "t", {}), (second, "t", {}), (third, "t", {})]),
+    )
+    save = AsyncMock(return_value=True)
+    monkeypatch.setattr(soc_worker, "save_verdict", save)
+    verdict = {"is_malicious": False, "reasoning": "normal"}
+    graph = SimpleNamespace(ainvoke=AsyncMock(side_effect=[verdict, ModelConnectionError("Connection error.")]))
+    monkeypatch.setattr(soc_worker.asyncio, "sleep", AsyncMock(side_effect=asyncio.CancelledError))
+    with pytest.raises(asyncio.CancelledError):
+        await soc_worker.run_soc_analyst_loop(graph, LLMQueueManager())
+    assert graph.ainvoke.await_count == 2
+    save.assert_awaited_once_with(first, AnalysisOutput(is_malicious=False, reasoning="normal"))
+    assert soc_worker.asyncio.sleep.await_args.args[0] == 5
