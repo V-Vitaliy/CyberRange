@@ -31,9 +31,9 @@ class TestSettings(unittest.TestCase):
         self.assertEqual(settings.SMTP_HOST, "")
         self.assertEqual(
             settings.DATABASE_URL,
-            "postgresql+asyncpg://cyberadmin:cyberpassword123@localhost:5432/cyberrange",
+            "postgresql+asyncpg://cyberadmin:<POSTGRES_PASSWORD>@localhost:5432/cyberrange",
         )
-        self.assertEqual(settings.REDIS_URL, "redis://localhost:6379")
+        self.assertEqual(settings.REDIS_URL, "redis://:<REDIS_PASSWORD>@localhost:6379/0")
 
     def test_environment_overrides_example_settings(self):
         example = ROOT_DIR / ".env.example"

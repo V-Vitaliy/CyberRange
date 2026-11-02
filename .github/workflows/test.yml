@@ -74,6 +74,41 @@ jobs:
           python backend/tests/integration/test_sqli_isolation_postgres.py -v 2>&1 | tee result.txt
           ! grep -qi skipped result.txt
 
+  compose-isolation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start services with generated credentials
+        run: |
+          {
+            echo "POSTGRES_USER=cyberadmin"
+            echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)"
+            echo "POSTGRES_DB=cyberrange"
+            echo "REDIS_PASSWORD=$(openssl rand -hex 24)"
+          } > .env
+          docker compose -f docker-compose.state.yml up -d --wait
+          docker compose -f docker-compose.compute.yml up -d
+      - name: Services require credentials and listen on loopback only
+        run: |
+          set -a; . ./.env; set +a
+          external=$(hostname -I | awk '{print $1}')
+          # Redis rejects unauthenticated commands and accepts the configured password.
+          docker exec cyberrange_redis redis-cli ping | grep -q NOAUTH
+          docker exec -e REDISCLI_AUTH="$REDIS_PASSWORD" cyberrange_redis redis-cli ping | grep -q PONG
+          for _ in $(seq 30); do curl -sf http://127.0.0.1:8000/api/v2/heartbeat && break; sleep 2; done
+          curl -sf http://127.0.0.1:8000/api/v2/heartbeat
+          # Published ports are bound to 127.0.0.1, so the host's external address is refused.
+          for port in 5432 6379 8000; do
+            docker ps --format '{{.Ports}}' | grep -q "127.0.0.1:$port->"
+            if timeout 3 bash -c "echo > /dev/tcp/$external/$port" 2>/dev/null; then
+              echo "Port $port is reachable on $external"; exit 1
+            fi
+          done
+      - name: Compose refuses to start without passwords
+        run: |
+          rm .env
+          ! docker compose -f docker-compose.state.yml config 2>/dev/null
+
   frontend:
     runs-on: ubuntu-latest
     defaults:

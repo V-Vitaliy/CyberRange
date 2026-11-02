@@ -6,12 +6,9 @@ from app.core.config import settings
 class VectorStore:
     def __init__(self):
         import chromadb
-        from chromadb.config import Settings
         from sentence_transformers import SentenceTransformer
 
-        self.client = chromadb.HttpClient(
-            host=settings.CHROMA_HOST, port=settings.CHROMA_PORT, settings=Settings(allow_reset=True)
-        )
+        self.client = chromadb.HttpClient(host=settings.CHROMA_HOST, port=settings.CHROMA_PORT)
         model_name = "all-mpnet-base-v2"
         device_type = "cpu"
         print(f"Loading embedding model {model_name} on {device_type}...")

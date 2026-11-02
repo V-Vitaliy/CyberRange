@@ -7,7 +7,7 @@ uvicorn
 sqlalchemy[asyncio]
 redis
 pydantic_settings
-chromadb
+chromadb>=1.5.9,<1.6
 PyJWT
 bcrypt
 pypdf
