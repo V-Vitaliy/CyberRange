@@ -1,4 +1,5 @@
 """Intentional educational SQLi, executed ONLY through a restricted lab login."""
+
 import json
 from pathlib import Path
 from uuid import UUID
@@ -28,17 +29,23 @@ def reader_url(lab_id):
         data = json.loads(path.read_text())
         url = make_url(data[str(objects.lab_id)])
         control = make_url(settings.DATABASE_URL)
-        if (url.drivername != 'postgresql+asyncpg' or url.username != objects.reader
-                or not url.password or url.database != control.database):
+        if (
+            url.drivername != "postgresql+asyncpg"
+            or url.username != objects.reader
+            or not url.password
+            or url.database != control.database
+        ):
             raise ValueError()
+
         # Views/privileges were provisioned in the same PostgreSQL deployment.
         def host(value):
-            return 'localhost' if value in ('localhost', '127.0.0.1', '::1') else value
+            return "localhost" if value in ("localhost", "127.0.0.1", "::1") else value
+
         if host(url.host) != host(control.host) or (url.port or 5432) != (control.port or 5432):
             raise ValueError()
         return url
     except Exception:
-        raise IsolationError('History search needs a configured restricted connection for this lab.') from None
+        raise IsolationError("History search needs a configured restricted connection for this lab.") from None
 
 
 async def search_history(lab_id, session_id, query):
@@ -51,20 +58,28 @@ async def search_history(lab_id, session_id, query):
         f'SELECT id, title, messages FROM "{objects.schema}".chat_history '
         f"WHERE session_id = '{session_id}'::uuid "
         f"AND (title || ' ' || messages::text) ILIKE '%{query}%' "
-        'ORDER BY created_at'
+        "ORDER BY created_at"
     )
     engine = create_async_engine(
-        url, hide_parameters=True, poolclass=NullPool,
-        connect_args={'timeout': 10, 'command_timeout': 5,
-                      'server_settings': {'statement_timeout': '3000', 'lock_timeout': '1000',
-                                          'default_transaction_read_only': 'on'}},
+        url,
+        hide_parameters=True,
+        poolclass=NullPool,
+        connect_args={
+            "timeout": 10,
+            "command_timeout": 5,
+            "server_settings": {
+                "statement_timeout": "3000",
+                "lock_timeout": "1000",
+                "default_transaction_read_only": "on",
+            },
+        },
     )
     try:
         async with engine.connect() as conn:
             async with conn.begin():
-                identity = (await conn.execute(text('SELECT session_user, current_user'))).one()
+                identity = (await conn.execute(text("SELECT session_user, current_user"))).one()
                 if tuple(identity) != (objects.reader, objects.reader):
-                    raise IsolationError('History connection is not the expected lab reader.')
+                    raise IsolationError("History connection is not the expected lab reader.")
                 await check_reader_boundary(conn, objects)
                 # Use driver SQL: SQLAlchemy must not interpret colon-containing
                 # student input as bind parameters. asyncpg accepts one statement.
@@ -73,19 +88,22 @@ async def search_history(lab_id, session_id, query):
     except IsolationError:
         raise
     except DBAPIError as exc:
-        code = getattr(exc.orig, 'sqlstate', None)
+        code = getattr(exc.orig, "sqlstate", None)
         messages = {
-            '42601': 'SQL syntax error', '42501': 'SQL permission denied',
-            '42P01': 'SQL relation does not exist', '42703': 'SQL column does not exist',
-            '42804': 'SQL type mismatch', '22P02': 'SQL invalid input value',
-            '57014': 'SQL query timed out',
+            "42601": "SQL syntax error",
+            "42501": "SQL permission denied",
+            "42P01": "SQL relation does not exist",
+            "42703": "SQL column does not exist",
+            "42804": "SQL type mismatch",
+            "22P02": "SQL invalid input value",
+            "57014": "SQL query timed out",
         }
         if code in messages:
-            raise HistoryQueryError(f'{messages[code]} [{code}]') from None
+            raise HistoryQueryError(f"{messages[code]} [{code}]") from None
         # Do not include driver exception strings: they can contain connection
         # details, SQL and data values from PostgreSQL errors.
-        raise HistoryQueryError('History database query failed.') from None
+        raise HistoryQueryError("History database query failed.") from None
     except Exception:
-        raise HistoryQueryError('History database is unavailable.') from None
+        raise HistoryQueryError("History database is unavailable.") from None
     finally:
         await engine.dispose()

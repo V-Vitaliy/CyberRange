@@ -3,23 +3,26 @@ import json
 import re
 from uuid import UUID
 
-from app.core.llm_engine import generate_unified_stream
-from app.core.security import get_authorized_session
-from app.core.prompt_builder import PromptBuilder
-from app.core.queue_manager import LLMQueueManager
-from app.db.chroma_client import VectorStore
-from app.db.repository import ChatRepository
-from app.db.repository import GameSessionRepository
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.llm_engine import generate_unified_stream
+from app.core.prompt_builder import PromptBuilder
+from app.core.queue_manager import LLMQueueManager
+from app.core.security import get_authorized_session
+from app.db.chroma_client import VectorStore
+from app.db.repository import ChatRepository
+
 _reranker = None
+
 
 def get_reranker():
     global _reranker
     if _reranker is None:
         from sentence_transformers import CrossEncoder
-        _reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2', max_length=512)
+
+        _reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", max_length=512)
     return _reranker
+
 
 async def generate_chat_response_sse(
     db: AsyncSession,
@@ -29,30 +32,31 @@ async def generate_chat_response_sse(
     queue: LLMQueueManager,
     vector_store: VectorStore,
     user: dict,
-    llm_instance
+    llm_instance,
 ):
     try:
-        user_id = user.get('id')
+        user_id = user.get("id")
         if not user_id:
             yield f"data: {json.dumps({'error': 'Invalid token: Missing user ID'})}\n\n"
             return
 
         session = await get_authorized_session(db, session_id, user["lab_instance_id"])
         await ChatRepository.get_or_create_thread(
-            db=db, thread_id=thread_id, user_id=user_id,
-            session_id=session_id, initial_prompt=prompt,
+            db=db,
+            thread_id=thread_id,
+            user_id=user_id,
+            session_id=session_id,
+            initial_prompt=prompt,
         )
 
         lab_filter = {"lab_instance_id": str(session.lab_instance_id)}
-        where = lab_filter if user.get("role") == "admin" else {
-            "$and": [lab_filter, {"access_level": "public"}]
-        }
+        where = lab_filter if user.get("role") == "admin" else {"$and": [lab_filter, {"access_level": "public"}]}
 
         retrieved_docs = vector_store.search_documents(prompt, n_results=5, where=where)
         context_texts = []
 
-        if retrieved_docs and retrieved_docs.get('documents') and len(retrieved_docs['documents']) > 0:
-            context_texts = [doc for doc in retrieved_docs['documents'][0] if doc]
+        if retrieved_docs and retrieved_docs.get("documents") and len(retrieved_docs["documents"]) > 0:
+            context_texts = [doc for doc in retrieved_docs["documents"][0] if doc]
 
         if session.use_reranker and context_texts:
             pairs = [[prompt, doc] for doc in context_texts]
@@ -61,13 +65,13 @@ async def generate_chat_response_sse(
             scored_docs.sort(key=lambda x: x[0], reverse=True)
             context_texts = [doc for score, doc in scored_docs[:2] if score > 0]
 
-        clean_username = re.sub(r'[^a-zA-Z0-9_]', '', user.get('sub', 'Guest')) or 'Guest'
+        clean_username = re.sub(r"[^a-zA-Z0-9_]", "", user.get("sub", "Guest")) or "Guest"
 
         system_prompt, human_prompt = PromptBuilder.build_prompts(
             user_query=prompt,
             context_chunks=context_texts,
             system_instruction=session.system_prompt,
-            username=clean_username
+            username=clean_username,
         )
 
         async def llm_task():
@@ -76,7 +80,7 @@ async def generate_chat_response_sse(
                 system_prompt=system_prompt,
                 human_prompt=human_prompt,
                 db=db,
-                lab_instance_id=str(session.lab_instance_id)
+                lab_instance_id=str(session.lab_instance_id),
             ):
                 yield chunk
 
@@ -87,12 +91,7 @@ async def generate_chat_response_sse(
                 full_ai_response += chunk
                 yield f"data: {json.dumps({'text': chunk})}\n\n"
 
-        await ChatRepository.append_messages(
-            db=db,
-            thread_id = thread_id,
-            prompt=prompt,
-            ai_response=full_ai_response
-            )
+        await ChatRepository.append_messages(db=db, thread_id=thread_id, prompt=prompt, ai_response=full_ai_response)
 
     except Exception as e:
         yield f"data: {json.dumps({'error': str(e)})}\n\n"

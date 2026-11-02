@@ -1,15 +1,16 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
+
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.db.database import async_session
-from app.db.models import SecurityAuditLog, GameSession
 from app.agents.soc_agent import AnalysisOutput
+from app.db.database import async_session
+from app.db.models import GameSession, SecurityAuditLog
 
 logger = logging.getLogger(__name__)
+
 
 async def run_soc_analyst_loop(soc_graph, queue):
     """
@@ -24,10 +25,7 @@ async def run_soc_analyst_loop(soc_graph, queue):
                 stmt = (
                     select(SecurityAuditLog)
                     .join(GameSession, SecurityAuditLog.lab_instance_id == GameSession.lab_instance_id)
-                    .where(
-                        SecurityAuditLog.investigated_at.is_(None),
-                        GameSession.is_solo == True
-                    )
+                    .where(SecurityAuditLog.investigated_at.is_(None), GameSession.is_solo.is_(True))
                     .order_by(SecurityAuditLog.timestamp)
                     .with_for_update(skip_locked=True, of=SecurityAuditLog)
                     .limit(5)
@@ -36,13 +34,12 @@ async def run_soc_analyst_loop(soc_graph, queue):
                 logs_to_process = result.scalars().all()
 
                 for log in logs_to_process:
-
                     initial_state = {
                         "log_id": str(log.id),
                         "event_type": log.event_type,
                         "payload": str(log.payload),
                         "is_malicious": False,
-                        "reasoning": ""
+                        "reasoning": "",
                     }
 
                     try:

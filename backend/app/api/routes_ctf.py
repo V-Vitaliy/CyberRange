@@ -1,19 +1,18 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.database import get_db
 from app.core.security import get_current_user_vulnerable, hash_ctf_flag
-from app.schemas.ctf_schemas import CtfSubmitRequest
+from app.db.database import get_db
 from app.db.repository import CtfRepository, GameSessionRepository
+from app.schemas.ctf_schemas import CtfSubmitRequest
 from app.services.siem_logger import log_security_event
 
 router = APIRouter()
 
+
 @router.post("/submit", tags=["Red Team - CTF"])
 async def submit_flag(
-    request: CtfSubmitRequest,
-    db: AsyncSession = Depends(get_db),
-    user: dict = Depends(get_current_user_vulnerable)
+    request: CtfSubmitRequest, db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user_vulnerable)
 ):
     """
     Endpoint for Red Team to submit captured flags.
@@ -42,7 +41,7 @@ async def submit_flag(
             lab_instance_id=lab_instance_id,
             event_type="CTF_SUBMIT_FAILED",
             payload={"attempted_flag": request.flag_value},
-            source_ip="CTF_ENGINE"
+            source_ip="CTF_ENGINE",
         )
         raise HTTPException(status_code=400, detail="Invalid flag.")
 
@@ -58,11 +57,11 @@ async def submit_flag(
         lab_instance_id=lab_instance_id,
         event_type="CTF_FLAG_CAPTURED",
         payload={"flag_id": flag.id, "reward": flag.reward, "submitted_by": user_id},
-        source_ip="CTF_ENGINE"
+        source_ip="CTF_ENGINE",
     )
 
     return {
         "success": True,
         "message": f"Flag captured successfully! You earned {flag.reward} points.",
-        "reward": flag.reward
+        "reward": flag.reward,
     }

@@ -1,4 +1,5 @@
 """Explicit seed for educational CyberRange; importing never connects to a DB."""
+
 import argparse
 import asyncio
 import getpass
@@ -24,12 +25,9 @@ class Options:
     is_solo: bool = True
 
     def validate(self):
-        if not isinstance(self.lab_id, UUID) or (
-            self.team_id is not None and not isinstance(self.team_id, UUID)
-        ):
+        if not isinstance(self.lab_id, UUID) or (self.team_id is not None and not isinstance(self.team_id, UUID)):
             raise SetupError("lab_id and team_id must be UUIDs.")
-        if any(not name or name != name.strip()
-               for name in (self.red_username, self.blue_username)):
+        if any(not name or name != name.strip() for name in (self.red_username, self.blue_username)):
             raise SetupError("Usernames must not be empty or have leading or trailing whitespace.")
         if self.red_username == self.blue_username:
             raise SetupError("Red and blue usernames must differ.")
@@ -71,24 +69,30 @@ async def seed(store, options, password_lookup, hash_password):
             if not password:
                 raise SetupError("A new user password must not be empty.")
             hashes[role] = hash_password(password)
-    created = {"red_team": users[0] is None, "blue_team": users[1] is None,
-               "session": session is None}
+    created = {"red_team": users[0] is None, "blue_team": users[1] is None, "session": session is None}
     for index, (name, role) in enumerate(roles):
         if users[index] is None:
             users[index] = store.add_user(
-                id=uuid4(), username=name, role=role,
-                lab_instance_id=options.lab_id, password_hash=hashes[role])
+                id=uuid4(), username=name, role=role, lab_instance_id=options.lab_id, password_hash=hashes[role]
+            )
     if session is None:
         session = store.add_session(
-            id=uuid4(), lab_instance_id=options.lab_id,
+            id=uuid4(),
+            lab_instance_id=options.lab_id,
             team_id=options.team_id or users[0].id,
-            is_solo=options.is_solo, defense_budget=options.budget)
+            is_solo=options.is_solo,
+            defense_budget=options.budget,
+        )
     await store.flush()
     return {
-        "lab_instance_id": str(options.lab_id), "session_id": str(session.id),
-        "team_id": str(session.team_id), "is_solo": session.is_solo,
-        "red_user_id": str(users[0].id), "blue_user_id": str(users[1].id),
-        "red_username": users[0].username, "blue_username": users[1].username,
+        "lab_instance_id": str(options.lab_id),
+        "session_id": str(session.id),
+        "team_id": str(session.team_id),
+        "is_solo": session.is_solo,
+        "red_user_id": str(users[0].id),
+        "blue_user_id": str(users[1].id),
+        "red_username": users[0].username,
+        "blue_username": users[1].username,
         "created": created,
     }
 
@@ -102,8 +106,7 @@ class SqlStore:
         return result.scalars().one_or_none()
 
     async def sessions(self, lab_id):
-        result = await self.db.execute(
-            self.select(self.Session).where(self.Session.lab_instance_id == lab_id))
+        result = await self.db.execute(self.select(self.Session).where(self.Session.lab_instance_id == lab_id))
         return result.scalars().all()
 
     def add_user(self, **values):
@@ -120,8 +123,9 @@ class SqlStore:
         await self.db.flush()
 
 
-async def seed_transaction(engine, session_factory, metadata, text, make_store,
-                           options, password_lookup, hash_password):
+async def seed_transaction(
+    engine, session_factory, metadata, text, make_store, options, password_lookup, hash_password
+):
     # Serialize this script's create_all and username checks across all labs.
     # This lock does not govern normal application requests.
     async with engine.begin() as connection:
@@ -143,36 +147,46 @@ async def run_setup(options):
     from sqlalchemy import select, text
     from sqlalchemy.engine import make_url
     from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+
     from app.core.config import settings
     from app.core.security import get_password_hash
     from app.db.database import Base
-    from app.db.models import User, GameSession
+    from app.db.models import GameSession, User
 
     url = make_url(settings.DATABASE_URL)
     if url.drivername != "postgresql+asyncpg":
         raise SetupError("DATABASE_URL must use postgresql+asyncpg.")
-    engine = create_async_engine(url, echo=False, hide_parameters=True,
-                                 connect_args={"timeout": 10})
+    engine = create_async_engine(url, echo=False, hide_parameters=True, connect_args={"timeout": 10})
     try:
         return await seed_transaction(
-            engine, AsyncSession, Base.metadata, text,
+            engine,
+            AsyncSession,
+            Base.metadata,
+            text,
             lambda db: SqlStore(db, User, GameSession, select),
-            options, read_password, get_password_hash)
+            options,
+            read_password,
+            get_password_hash,
+        )
     finally:
         await engine.dispose()
 
 
 def parser():
     result = argparse.ArgumentParser(description="Provision one CyberRange learning lab.")
-    result.add_argument("--lab-id", required=True, type=UUID,
-                        help="Stable lab UUID; reuse the same UUID on subsequent runs.")
-    result.add_argument("--team-id", type=UUID,
-                        help="For creation: team UUID; defaults to the red user ID.")
+    result.add_argument(
+        "--lab-id", required=True, type=UUID, help="Stable lab UUID; reuse the same UUID on subsequent runs."
+    )
+    result.add_argument("--team-id", type=UUID, help="For creation: team UUID; defaults to the red user ID.")
     result.add_argument("--red-username", default="red_student")
     result.add_argument("--blue-username", default="blue_analyst")
     result.add_argument("--budget", type=int, default=5, help="Applies only to a new session.")
-    result.add_argument("--is-solo", action=argparse.BooleanOptionalAction, default=True,
-                        help="Auto-SOC for a new session; preserves the existing setting.")
+    result.add_argument(
+        "--is-solo",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Auto-SOC for a new session; preserves the existing setting.",
+    )
     return result
 
 
@@ -191,9 +205,12 @@ def main(argv=None):
         return 1
     except Exception:
         # DB exceptions can contain SQL parameters, hashes and credentials.
-        print("admin_setup: setup could not be confirmed. Check DATABASE_URL, PostgreSQL "
-              "availability, CONNECT/USAGE/CREATE and table write permissions, and schema "
-              "compatibility. After recovery, repeat the same command; secrets are hidden.", file=sys.stderr)
+        print(
+            "admin_setup: setup could not be confirmed. Check DATABASE_URL, PostgreSQL "
+            "availability, CONNECT/USAGE/CREATE and table write permissions, and schema "
+            "compatibility. After recovery, repeat the same command; secrets are hidden.",
+            file=sys.stderr,
+        )
         return 1
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0

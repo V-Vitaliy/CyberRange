@@ -1,12 +1,15 @@
 import asyncio
-from fastapi import HTTPException, status, Request
 from typing import AsyncGenerator, Callable
+
+from fastapi import HTTPException, Request, status
+
 
 class LLMQueueManager:
     """
     Manages concurrent access to the GPU to prevent CUDA Out Of Memory (OOM) errors.
     Implements a strict waiting queue with timeouts and capacity limits.
     """
+
     def __init__(self):
         self.max_queue_size = 50
         self.timeout_seconds = 300
@@ -21,7 +24,7 @@ class LLMQueueManager:
         except asyncio.QueueFull:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Server queue is full. GPU is overloaded. Please try again later."
+                detail="Server queue is full. GPU is overloaded. Please try again later.",
             )
 
         try:
@@ -31,8 +34,7 @@ class LLMQueueManager:
             self.queue.get_nowait()
             self.queue.task_done()
             raise HTTPException(
-                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-                detail="Request timed out while waiting for GPU resources."
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="Request timed out while waiting for GPU resources."
             )
 
         except asyncio.CancelledError:
@@ -45,13 +47,16 @@ class LLMQueueManager:
         self.queue.get_nowait()
         self.queue.task_done()
 
-    async def stream_with_lock(self,generetor_func: Callable[[], AsyncGenerator[str, None]])->AsyncGenerator[str, None]:
+    async def stream_with_lock(
+        self, generetor_func: Callable[[], AsyncGenerator[str, None]]
+    ) -> AsyncGenerator[str, None]:
         await self.wait_for_turn()
         try:
             async for chunk in generetor_func():
                 yield chunk
         finally:
             self.release_turn()
+
 
 def get_queue_manager(request: Request) -> LLMQueueManager:
     return request.app.state.queue_manager

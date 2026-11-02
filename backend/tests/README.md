@@ -33,7 +33,9 @@ Run an individual group the same way:
 PYTHONPATH=backend python -m pytest -q -ra backend/tests/unit
 ```
 
-CI runs `backend/tests` recursively and includes all groups.
+CI runs `backend/tests` recursively and includes all groups. A separate CI job runs
+both PostgreSQL integration checks against a PostgreSQL service container and fails
+if either check skips itself.
 
 `api/test_routes_ctf.py` exercises the mounted submit route with real signed lab scopes,
 identity checks, repository SQL and submission writes using in-memory SQLite.

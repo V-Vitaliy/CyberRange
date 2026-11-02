@@ -3,35 +3,41 @@ from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import jwt
-from app.core.config import settings
-from app.db.database import get_db
-from app.db.models import User
-from app.db.repository import UserRepository, GameSessionRepository, ensure_uuid
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
+from app.db.database import get_db
+from app.db.models import User
+from app.db.repository import GameSessionRepository, UserRepository, ensure_uuid
+
 
 # ---------------------------------------------------------
 #  Hashing Utilities
 # ---------------------------------------------------------
 def _pre_hash(password: str) -> bytes:
     """Pre-hash with SHA-256 to bypass bcrypt's 72-byte limit."""
-    return hashlib.sha256(password.encode('utf-8')).hexdigest().encode('ascii')
+    return hashlib.sha256(password.encode("utf-8")).hexdigest().encode("ascii")
+
 
 def get_password_hash(password: str) -> str:
     """Creates a bcrypt password hash."""
     password_bytes = _pre_hash(password)
     salt = bcrypt.gensalt()
-    return bcrypt.hashpw(password_bytes, salt).decode('utf-8')
+    return bcrypt.hashpw(password_bytes, salt).decode("utf-8")
+
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verifies the password directly via bcrypt."""
     password_bytes = _pre_hash(plain_password)
-    return bcrypt.checkpw(password_bytes, hashed_password.encode('utf-8'))
+    return bcrypt.checkpw(password_bytes, hashed_password.encode("utf-8"))
+
 
 def hash_ctf_flag(flag_value: str) -> str:
     """Hashes a CTF flag value using SHA-256 for secure database storage and comparison."""
-    return hashlib.sha256(flag_value.encode('utf-8')).hexdigest()
+    return hashlib.sha256(flag_value.encode("utf-8")).hexdigest()
+
 
 # ---------------------------------------------------------
 # JWT Utilities
@@ -73,12 +79,12 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
         to_encode["lab_scope"] = jwt.encode(scope, SECRET_KEY, algorithm=ALGORITHM)
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
+
 # =========================================================
 # SECURE AUTHENTICATION (Blue Team)
 # =========================================================
 async def get_current_user_secure(
-    authorization: str | None = Depends(get_bearer_authorization),
-    db: AsyncSession = Depends(get_db)
+    authorization: str | None = Depends(get_bearer_authorization), db: AsyncSession = Depends(get_db)
 ) -> User:
     """
     SECURE: Strictly verifies JWT signature and retrieves the user.
@@ -108,6 +114,7 @@ async def get_current_user_secure(
         raise HTTPException(status_code=401, detail="User not found")
 
     return user
+
 
 # =========================================================
 # VULNERABLE AUTHENTICATION (Red Team)
@@ -140,14 +147,19 @@ async def get_current_user_vulnerable(
     try:
         payload = jwt.decode(token, options={"verify_signature": False})
         scope = jwt.decode(
-            payload.get("lab_scope", ""), SECRET_KEY,
-            algorithms=[ALGORITHM], audience="red-lab-scope",
+            payload.get("lab_scope", ""),
+            SECRET_KEY,
+            algorithms=[ALGORITHM],
+            audience="red-lab-scope",
             options={"require": ["sub", "id", "lab_instance_id", "exp"]},
         )
         user = await UserRepository.get_by_id(db, ensure_uuid(scope["id"]))
-        if (user is None or user.role != "red_team"
-                or user.username != scope["sub"]
-                or str(user.lab_instance_id) != scope["lab_instance_id"]):
+        if (
+            user is None
+            or user.role != "red_team"
+            or user.username != scope["sub"]
+            or str(user.lab_instance_id) != scope["lab_instance_id"]
+        ):
             raise ValueError("Invalid lab scope; please re-login")
         for key in ("sub", "id", "lab_instance_id"):
             if payload.get(key) != scope[key]:
@@ -157,7 +169,9 @@ async def get_current_user_vulnerable(
             raise ValueError("Game session not found")
         if session.jwt_filter_enabled:
             payload = jwt.decode(
-                token, SECRET_KEY, algorithms=[ALGORITHM],
+                token,
+                SECRET_KEY,
+                algorithms=[ALGORITHM],
                 options={"require": ["exp", "sub", "id", "lab_instance_id"]},
             )
             if payload.get("role") != user.role:

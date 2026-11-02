@@ -1,24 +1,21 @@
 from uuid import UUID
 
-from app.db.models import GameSession
-from app.db.repository import GameSessionRepository
-from app.schemas.blue_team import BuyDefenseResponse
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.repository import GameSessionRepository
+from app.schemas.blue_team import BuyDefenseResponse
+
 # Pricing catalog for defense mechanisms (according to specification)
 DEFENSE_PRICING = {
-    "system_prompt": 2, # Overriding system prompt
-    "jwt_filter": 2,    # Strengthening JWT filters (blocking alg: none)
-    "rate_limit": 3,    # Enabling Redis Rate Limiting
-    "reranker": 4       # Enabling Cross-Encoder Reranker
+    "system_prompt": 2,  # Overriding system prompt
+    "jwt_filter": 2,  # Strengthening JWT filters (blocking alg: none)
+    "rate_limit": 3,  # Enabling Redis Rate Limiting
+    "reranker": 4,  # Enabling Cross-Encoder Reranker
 }
 
-async def process_defense_purchase(
-    db: AsyncSession,
-    session_id: UUID,
-    defense_type: str
-) -> BuyDefenseResponse:
+
+async def process_defense_purchase(db: AsyncSession, session_id: UUID, defense_type: str) -> BuyDefenseResponse:
     """
     Handles the purchase of defense mechanisms by the Blue Team.
     Deducts points and updates the GameSession state.
@@ -33,7 +30,7 @@ async def process_defense_purchase(
     game_session = await GameSessionRepository.get_by_id(db, session_id, for_update=True)
 
     if not game_session:
-         raise HTTPException(status_code=404, detail="Game session not found.")
+        raise HTTPException(status_code=404, detail="Game session not found.")
 
     # 3. Check if already purchased (we map input strings to DB columns)
     already_owned = False
@@ -53,8 +50,7 @@ async def process_defense_purchase(
     # 4. Check budget
     if game_session.defense_budget < price:
         raise HTTPException(
-            status_code=400,
-            detail=f"Insufficient funds. Required: {price}, Available: {game_session.defense_budget}"
+            status_code=400, detail=f"Insufficient funds. Required: {price}, Available: {game_session.defense_budget}"
         )
 
     # 5. Process Purchase
@@ -79,6 +75,6 @@ async def process_defense_purchase(
             "system_prompt_overridden": game_session.system_prompt != "You are a helpful university assistant.",
             "rate_limit_enabled": game_session.rate_limit_enabled,
             "reranker_enabled": game_session.use_reranker,
-            "jwt_filter_enabled": game_session.jwt_filter_enabled
-        }
+            "jwt_filter_enabled": game_session.jwt_filter_enabled,
+        },
     )
