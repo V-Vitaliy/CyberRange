@@ -195,23 +195,22 @@ async def test_history_logs_error_and_next_request_works(history, error, status)
     assert history.log.await_args_list[1].kwargs["payload"] == {"error": str(error), "failed_query": "'"}
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "filename,expected,indexed",
-    [
-        ("normal.pdf", 200, False),
-        ("../student_uploads/poison.pdf", 200, True),
-        ("../../outside.pdf", 403, False),
-        ("../student_uploads-other/outside.pdf", 403, False),
-    ],
-)
-async def test_upload_keeps_traversal_exercise_inside_own_lab(monkeypatch, tmp_path, filename, expected, indexed):
+PDF_BYTES = b"%PDF-1.4 isolated test"
+
+
+@pytest.fixture
+def upload(monkeypatch, tmp_path):
+    """Post to the real upload route with storage, Redis, ETL and SIEM replaced by doubles."""
     monkeypatch.chdir(tmp_path)
-    user = dict(id=str(uuid4()), lab_instance_id=str(uuid4()), role="red_team")
-    redis = AsyncMock()
-    process_pdf = AsyncMock()
-    monkeypatch.setattr(routes_red, "log_security_event", AsyncMock())
-    monkeypatch.setattr(routes_red, "ETLWorker", Mock(return_value=SimpleNamespace(process_pdf=process_pdf)))
+    env = SimpleNamespace(
+        user=dict(id=str(uuid4()), lab_instance_id=str(uuid4()), role="red_team"),
+        redis=AsyncMock(),
+        process_pdf=AsyncMock(),
+        log=AsyncMock(),
+        root=tmp_path,
+    )
+    monkeypatch.setattr(routes_red, "log_security_event", env.log)
+    monkeypatch.setattr(routes_red, "ETLWorker", Mock(return_value=SimpleNamespace(process_pdf=env.process_pdf)))
 
     class File:
         async def __aenter__(self):
@@ -231,17 +230,22 @@ async def test_upload_keeps_traversal_exercise_inside_own_lab(monkeypatch, tmp_p
     monkeypatch.setattr(routes_red.aiofiles, "open", open_file)
 
     async def current_user():
-        return user
+        return env.user
 
     async def database():
         yield object()
 
     async def redis_dependency():
-        yield redis
+        yield env.redis
 
     async def vector_store():
         return Mock()
 
+    async def post(filename, content=PDF_BYTES):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            return await client.post("/api/red/upload", files={"file": (filename, content, "application/pdf")})
+
+    env.post = post
     red_app.dependency_overrides.update(
         {
             get_current_user_vulnerable: current_user,
@@ -251,12 +255,24 @@ async def test_upload_keeps_traversal_exercise_inside_own_lab(monkeypatch, tmp_p
         }
     )
     try:
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-            response = await client.post(
-                "/api/red/upload", files={"file": (filename, b"isolated test", "application/pdf")}
-            )
+        yield env
     finally:
         red_app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "filename,expected,indexed",
+    [
+        ("normal.pdf", 200, False),
+        ("../student_uploads/poison.pdf", 200, True),
+        ("../../outside.pdf", 403, False),
+        ("../student_uploads-other/outside.pdf", 403, False),
+    ],
+)
+async def test_upload_keeps_traversal_exercise_inside_own_lab(upload, filename, expected, indexed):
+    user, redis, process_pdf, tmp_path = upload.user, upload.redis, upload.process_pdf, upload.root
+    response = await upload.post(filename)
     assert response.status_code == expected
     assert not (tmp_path / "lab_uploads" / "outside.pdf").exists()
     if indexed:
@@ -268,6 +284,21 @@ async def test_upload_keeps_traversal_exercise_inside_own_lab(monkeypatch, tmp_p
         job = redis.hset.call_args_list[0].kwargs["mapping"]
         assert job["user_id"] == user["id"]
         assert job["lab_instance_id"] == user["lab_instance_id"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "content,status",
+    [(b"%PDF-" + b"x" * 64, 413), (b"MZ not a pdf", 415)],
+)
+async def test_upload_rejects_oversized_or_non_pdf_before_storing(upload, monkeypatch, content, status):
+    monkeypatch.setattr(routes_red.settings, "UPLOAD_MAX_BYTES", 32)
+    response = await upload.post("../student_uploads/poison.pdf", content)
+    assert response.status_code == status
+    assert not (upload.root / "lab_uploads").exists()
+    upload.redis.hset.assert_not_awaited()
+    upload.process_pdf.assert_not_called()
+    assert upload.log.call_args.kwargs["event_type"] == "FILE_UPLOAD_REJECTED"
 
 
 @pytest.mark.asyncio

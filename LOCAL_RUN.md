@@ -106,6 +106,12 @@ split deployment, bind them to a private address that lab users cannot reach.
 Redis requires `REDIS_PASSWORD`. Chroma 1.x has no built-in authentication, so
 network isolation is its only protection until a token proxy is added.
 
+Input limits (optional `.env` overrides): `UPLOAD_MAX_BYTES` (10 MiB, PDF files
+only), `PDF_MAX_PAGES` (200) and `PROMPT_MAX_CHARS` (4000). Requests that declare
+a larger body are rejected before they are read. A chunked request without
+`Content-Length` is still bounded by the upload route itself; in a public
+deployment also cap the body size in the reverse proxy.
+
 Upgrading an existing installation:
 
 - Set `REDIS_PASSWORD` and add it to `REDIS_URL`, then recreate Redis with

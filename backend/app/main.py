@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.agents.soc_agent import create_soc_graph
 from app.api.routes_blue import router as blue_router
@@ -85,6 +86,19 @@ app = FastAPI(
     redoc_url=None,
     lifespan=lifespan,
 )
+
+# Allowance for multipart framing around the largest accepted upload.
+MULTIPART_OVERHEAD_BYTES = 64 * 1024
+
+
+@app.middleware("http")
+async def reject_oversized_bodies(request, call_next):
+    """Reject declared oversized bodies before they are read; routes enforce exact limits."""
+    length = request.headers.get("content-length")
+    if length and length.isdigit() and int(length) > settings.UPLOAD_MAX_BYTES + MULTIPART_OVERHEAD_BYTES:
+        return JSONResponse(status_code=413, content={"detail": "Request body too large."})
+    return await call_next(request)
+
 
 app.add_middleware(
     CORSMiddleware,
