@@ -9,7 +9,7 @@ from app.agents.soc_agent import create_soc_graph
 from app.api.routes_blue import router as blue_router
 from app.api.routes_ctf import router as ctf_router
 from app.api.routes_red import router as red_router
-from app.core.config import settings
+from app.core.config import require_strong_jwt_secret, settings
 from app.core.llm_engine import init_groq, init_llm, init_openai_compatible
 from app.core.queue_manager import LLMQueueManager
 from app.db.chroma_client import VectorStore
@@ -35,6 +35,7 @@ blue_app.include_router(blue_router, prefix="")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    require_strong_jwt_secret(settings.JWT_SECRET)
     queue_manager = LLMQueueManager()
     vector_store = VectorStore()
 

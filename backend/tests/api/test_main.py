@@ -165,3 +165,14 @@ async def test_bearer_header_reaches_existing_auth_checks(monkeypatch, side):
     finally:
         sub_app.dependency_overrides.clear()
         sub_app.dependency_overrides.update(previous)
+
+
+@pytest.mark.asyncio
+async def test_startup_refuses_weak_jwt_secret_before_loading_models(monkeypatch):
+    monkeypatch.setattr(main.settings, "JWT_SECRET", "super-secret-blue-team-key")
+    vector_store = Mock()
+    monkeypatch.setattr(main, "VectorStore", vector_store)
+    with pytest.raises(RuntimeError, match="JWT_SECRET"):
+        async with main.lifespan(main.app):
+            pass
+    vector_store.assert_not_called()
