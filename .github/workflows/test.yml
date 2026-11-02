@@ -98,12 +98,32 @@ jobs:
           for _ in $(seq 30); do curl -sf http://127.0.0.1:8000/api/v2/heartbeat && break; sleep 2; done
           curl -sf http://127.0.0.1:8000/api/v2/heartbeat
           # Published ports are bound to 127.0.0.1, so the host's external address is refused.
-          for port in 5432 6379 8000; do
+          for port in 5432 6379 8000 1025 8025; do
             docker ps --format '{{.Ports}}' | grep -q "127.0.0.1:$port->"
             if timeout 3 bash -c "echo > /dev/tcp/$external/$port" 2>/dev/null; then
               echo "Port $port is reachable on $external"; exit 1
             fi
           done
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Agent email reaches only the Mailpit sink
+        env:
+          PYTHONPATH: backend
+          SMTP_HOST: 127.0.0.1
+          SMTP_PORT: '1025'
+          SMTP_STARTTLS: 'false'
+        run: |
+          python -m pip install -q pydantic-settings
+          python - <<'PY'
+          import json, urllib.request
+          from app.services.email_service import EmailService
+          assert EmailService.recipient_allowed("student@lab.local")
+          assert not EmailService.recipient_allowed("attacker@example.com")
+          assert EmailService.send_real_email("student@lab.local", "CI sink check", "hello")
+          messages = json.load(urllib.request.urlopen("http://127.0.0.1:8025/api/v1/messages"))["messages"]
+          assert [m["To"][0]["Address"] for m in messages] == ["student@lab.local"], messages
+          PY
       - name: Compose refuses to start without passwords
         run: |
           rm .env
