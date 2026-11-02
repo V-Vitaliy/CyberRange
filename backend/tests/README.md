@@ -1,9 +1,18 @@
 # Backend tests
 
-- `unit/`: settings and request queue.
-- `api/`: HTTP/WebSocket routes, file uploads, and application lifecycle.
-- `services/`: data access, switchable defenses, RAG, SOC, and email tools.
-- `test_admin_setup.py`: database setup using doubles; can also run separately with standard-library `unittest` and no backend dependencies.
+Tests are grouped by the module they verify. Add new tests to the existing file
+of that module instead of creating a file per task.
+
+- `unit/test_<module>.py`: one file per application module (`config`, `security`,
+  `llm_engine`, `rag_service`, `soc`, `defense`, ...). `unit/test_admin_setup.py`
+  covers `scripts/admin_setup.py` with doubles and can also run with standard-library
+  `unittest` and no backend dependencies.
+- `api/test_<router>.py`: HTTP/WebSocket routes (`routes_red`, `routes_blue`,
+  `routes_ctf`) and application wiring (`main`).
+- `integration/`: opt-in tests against real PostgreSQL.
+- Shared fixtures: `conftest.py` (ASGI client) and `unit/conftest.py` (email tool
+  harness). `openai_doubles.py` holds offline HTTP doubles for the OpenAI-compatible
+  adapter.
 
 The default tests use external service doubles: PostgreSQL, Redis, Chroma, LLM,
 and SMTP do not need to run. They do not establish compatibility with real
@@ -21,12 +30,12 @@ PYTHONPATH=backend python -m pytest -q -ra backend/tests
 Run an individual group the same way:
 
 ```bash
-PYTHONPATH=backend python -m pytest -q -ra backend/tests/services
+PYTHONPATH=backend python -m pytest -q -ra backend/tests/unit
 ```
 
 CI runs `backend/tests` recursively and includes all groups.
 
-`api/test_ctf.py` exercises the mounted submit route with real signed lab scopes,
+`api/test_routes_ctf.py` exercises the mounted submit route with real signed lab scopes,
 identity checks, repository SQL and submission writes using in-memory SQLite.
 It covers two labs sharing a flag value, foreign/unknown/legacy flag rejection,
 duplicate capture, recorded team/lab/reward and UUID normalization. Only the DB
@@ -69,5 +78,4 @@ with an explicitly designated test database. Run it separately:
 It retains two new synthetic labs and their roles/views, and tests actual ACLs,
 intentional injection, foreign-lab rejection, error recovery and persisted SIEM
 events through the mounted HTTP route and real auth. It does not start application
-lifespan, Redis, Chroma, LLM or a network HTTP server. See
-[ISSUE_59_ISOLATION.md](../../docs/tasks/ISSUE_59_ISOLATION.md) for results and reproduction.
+lifespan, Redis, Chroma, LLM or a network HTTP server.
