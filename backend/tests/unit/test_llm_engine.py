@@ -9,8 +9,9 @@ import httpx
 import pytest
 from langchain_core.messages import AIMessageChunk
 
+from app.agents.tools import email_tool
+from app.agents.tools.email_tool import send_email
 from app.core import llm_engine
-from app.core.tools import send_email
 from tests.openai_doubles import assert_request, make_model, sse
 
 
@@ -207,8 +208,8 @@ async def test_server_failure_is_propagated(monkeypatch):
 )
 async def test_real_smtp_only_delivers_to_lab_domains(harness, monkeypatch, address, body, event_type, delivery):
     audit, send = harness
-    monkeypatch.setattr(llm_engine.settings, "SMTP_HOST", "smtp.lab.invalid")
-    monkeypatch.setattr(llm_engine.settings, "EMAIL_ALLOWED_DOMAINS", "lab.local")
+    monkeypatch.setattr(email_tool.settings, "SMTP_HOST", "smtp.lab.invalid")
+    monkeypatch.setattr(email_tool.settings, "EMAIL_ALLOWED_DOMAINS", "lab.local")
     output = await run_stream([tool_chunk(json.dumps(dict(to_address=address, subject="Test", body=body)))])
     assert send.called is (delivery == "sent")
     assert audit.call_args.kwargs["event_type"] == event_type

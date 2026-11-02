@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from app.core.tools import send_email
+from app.agents.tools.email_tool import send_email
 from app.llm import provider
 
 
