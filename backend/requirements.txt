@@ -1,2 +1,3 @@
--r requirements-groq.txt
+# Base runtime plus in-process GGUF inference (llama-cpp-python build).
+-r requirements-base.txt
 llama-cpp-python

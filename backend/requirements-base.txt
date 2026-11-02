@@ -1,18 +1,18 @@
-# Existing runtime dependencies for Groq; no local llama-cpp build.
+# Application runtime: FastAPI, PostgreSQL, Redis, Chroma, RAG and HTTP/Groq LLM providers.
+# CPU-only torch: embeddings and the reranker run on CPU; avoids ~4 GB of CUDA wheels.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
 fastapi
 uvicorn
 sqlalchemy[asyncio]
-psycopg2-binary
 redis
-python-jose[cryptography]
 pydantic_settings
 chromadb
 PyJWT
+bcrypt
 pypdf
 nltk
 aiofiles
-alembic
-passlib[bcrypt]
 sentence_transformers
 asyncpg
 python-multipart
