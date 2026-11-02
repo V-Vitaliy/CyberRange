@@ -24,7 +24,8 @@ If `.env` does not exist yet, copy `.env.example` to `.env`. Do not overwrite yo
 
 - `GROQ_API_KEY`: your key, stored only in the local `.env`.
 - `JWT_SECRET`: your own random secret.
-- `DATABASE_URL`, `REDIS_URL`: local connections consistent with your database setup.
+- `POSTGRES_PASSWORD`, `REDIS_PASSWORD`: generate each with `openssl rand -hex 24`. Docker Compose refuses to start while they are empty.
+- `DATABASE_URL`, `REDIS_URL`: replace the `<POSTGRES_PASSWORD>` and `<REDIS_PASSWORD>` placeholders with the same passwords.
 - `CHROMA_HOST=localhost`, `CHROMA_PORT=8000`.
 - `SMTP_HOST=`: leave empty for the first run. The email tool will simulate delivery and explicitly report that no email was sent.
 
@@ -98,6 +99,22 @@ python -m nltk.downloader punkt_tab
 ```
 
 Ports: PostgreSQL 5432, Redis 6379, Chroma 8000, API 8001, frontend 3000. Uploaded PDFs are stored locally.
+
+PostgreSQL, Redis and Chroma are published only on `127.0.0.1` by default
+(`STATE_BIND_ADDRESS`, `COMPUTE_BIND_ADDRESS`). Lab users must reach only the API
+and frontend: direct access to these services would bypass lab isolation. For a
+split deployment, bind them to a private address that lab users cannot reach.
+Redis requires `REDIS_PASSWORD`. Chroma 1.x has no built-in authentication, so
+network isolation is its only protection until a token proxy is added.
+
+Upgrading an existing installation:
+
+- Set `REDIS_PASSWORD` and add it to `REDIS_URL`, then recreate Redis with
+  `docker compose -f docker-compose.state.yml up -d redis`.
+- `POSTGRES_PASSWORD` only applies when the data volume is first created. If
+  your volume was created with the old default password, change it:
+  `docker exec -it cyberrange_postgres psql -U cyberadmin -d cyberrange -c "ALTER USER cyberadmin PASSWORD '<new password>'"`,
+  then update `POSTGRES_PASSWORD` and `DATABASE_URL`.
 
 On first use, SentenceTransformer downloads `all-mpnet-base-v2`, and tiktoken downloads `cl100k_base` data; the purchased reranker downloads `cross-encoder/ms-marco-MiniLM-L-6-v2`. This requires network access or a populated cache. Groq does not require GGUF.
 

@@ -1,20 +1,21 @@
-version: '3.8'
-
+# State services. Ports are published only on STATE_BIND_ADDRESS (default
+# 127.0.0.1); set it to a private interface address for a split deployment.
+# Never publish these services on an address that lab users can reach.
 services:
   postgres:
     image: postgres:15-alpine
     container_name: cyberrange_postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-cyberadmin}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cyberpassword123}
-      POSTGRES_DB: ${POSTGRES_DB:-cyberrange}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env}
     ports:
-      - "5432:5432"
+      - "${STATE_BIND_ADDRESS:-127.0.0.1}:5432:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cyberadmin} -d ${POSTGRES_DB:-cyberrange}"]
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -23,10 +24,12 @@ services:
     image: redis:7-alpine
     container_name: cyberrange_redis
     restart: unless-stopped
-    # AOF (Append Only File) for Persistence
-    command: redis-server --appendonly yes
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+    # AOF (Append Only File) for persistence; the password comes from the environment.
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
     ports:
-      - "6379:6379"
+      - "${STATE_BIND_ADDRESS:-127.0.0.1}:6379:6379"
     volumes:
       - redis_data:/data
 
