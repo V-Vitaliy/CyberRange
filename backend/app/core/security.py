@@ -42,11 +42,9 @@ def hash_ctf_flag(flag_value: str) -> str:
 # ---------------------------------------------------------
 # JWT Utilities
 # ---------------------------------------------------------
-SECRET_KEY = getattr(settings, "JWT_SECRET", "super-secret-blue-team-key")
-ALGORITHM = getattr(settings, "JWT_ALGORITHM", "HS256")
-
-if not SECRET_KEY:
-    raise RuntimeError("SECRET_KEY not set in configuration")
+# Validated at application startup by require_strong_jwt_secret.
+SECRET_KEY = settings.JWT_SECRET
+ALGORITHM = settings.JWT_ALGORITHM
 
 bearer_auth = HTTPBearer(
     scheme_name="BearerAuth",

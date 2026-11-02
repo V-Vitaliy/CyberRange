@@ -60,7 +60,8 @@ class Settings(BaseSettings):
     # Empty means history SQLi is unavailable; never fall back to DATABASE_URL.
     SQLI_CONNECTIONS_FILE: str = ""
 
-    JWT_SECRET: str = "super-secret-blue-team-key"
+    # Required: the API refuses to start with an empty, short or placeholder value.
+    JWT_SECRET: str = ""
     JWT_ALGORITHM: str = "HS256"
 
     REDIS_URL: str = "redis://localhost:6379"
@@ -72,6 +73,23 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
 
     model_config = SettingsConfigDict(env_file=str(ROOT_DIR / ".env"), env_file_encoding="utf-8", extra="ignore")
+
+
+MIN_JWT_SECRET_BYTES = 32
+# Values that were published as defaults or examples and must never sign tokens.
+PUBLISHED_JWT_SECRETS = {
+    "super-secret-blue-team-key",
+    "replace_this_with_a_long_random_string_in_production",
+}
+
+
+def require_strong_jwt_secret(secret: str) -> None:
+    """Reject secrets that would let lab users forge signed lab scopes or Blue Team tokens."""
+    if secret in PUBLISHED_JWT_SECRETS or len(secret.encode()) < MIN_JWT_SECRET_BYTES:
+        raise RuntimeError(
+            f"JWT_SECRET must be a private random value of at least {MIN_JWT_SECRET_BYTES} bytes; "
+            "generate one with: openssl rand -hex 32"
+        )
 
 
 settings = Settings()
