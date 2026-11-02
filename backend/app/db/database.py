@@ -3,11 +3,7 @@ from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import settings
 
-# Fetch the database URL from the central configuration.
-# If not yet defined in config.py, it falls back to the local Docker setup.
-DATABASE_URL = getattr(
-    settings, "DATABASE_URL", "postgresql+asyncpg://cyberadmin:cyberpassword123@127.0.0.1:5432/cyberrange"
-)
+DATABASE_URL = settings.DATABASE_URL
 
 # Create an asynchronous engine for PostgreSQL
 engine = create_async_engine(DATABASE_URL, echo=False, future=True, pool_pre_ping=True)

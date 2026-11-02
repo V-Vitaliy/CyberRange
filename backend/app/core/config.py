@@ -54,7 +54,8 @@ class Settings(BaseSettings):
     CHROMA_PORT: int = 8000
 
     # Postgres
-    DATABASE_URL: str = "postgresql+asyncpg://cyberadmin:cyberpassword123@127.0.0.1:5432/cyberrange"
+    # Credentials come only from the environment or .env.
+    DATABASE_URL: str = "postgresql+asyncpg://cyberadmin@127.0.0.1:5432/cyberrange"
 
     # Explicit local JSON mapping {lab UUID: restricted PostgreSQL URL}.
     # Empty means history SQLi is unavailable; never fall back to DATABASE_URL.
