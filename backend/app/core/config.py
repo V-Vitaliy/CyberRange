@@ -72,6 +72,11 @@ class Settings(BaseSettings):
     SMTP_PORT: int = 587
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
+    # Disable only for a local sink such as Mailpit that does not offer STARTTLS.
+    SMTP_STARTTLS: bool = True
+    SMTP_FROM: str = "assistant@lab.local"
+    # Comma-separated recipient domains the agent may email when SMTP_HOST is set.
+    EMAIL_ALLOWED_DOMAINS: str = "lab.local"
 
     model_config = SettingsConfigDict(env_file=str(ROOT_DIR / ".env"), env_file_encoding="utf-8", extra="ignore")
 

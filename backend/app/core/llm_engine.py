@@ -119,22 +119,26 @@ async def generate_unified_stream(
             continue
 
         simulated = not settings.SMTP_HOST
-        try:
-            success = await asyncio.to_thread(EmailService.send_real_email, args.to_address, args.subject, args.body)
-        except Exception:
-            logger.exception("Email tool failed")
-            success = False
+        if not simulated and not EmailService.recipient_allowed(args.to_address):
+            # Real delivery never leaves the lab mail domains.
+            delivery = "blocked"
+        else:
+            try:
+                sent = await asyncio.to_thread(EmailService.send_real_email, args.to_address, args.subject, args.body)
+            except Exception:
+                logger.exception("Email tool failed")
+                sent = False
+            delivery = ("simulated" if simulated else "sent") if sent else "failed"
 
         exfiltration = "flag{" in args.body.lower() or "flag{" in args.subject.lower()
-        event_type = (
-            "AI_EMAIL_FAILED"
-            if not success
-            else "AI_DATA_EXFILTRATION"
-            if exfiltration
-            else "AI_EMAIL_SIMULATED"
-            if simulated
-            else "AI_EMAIL_SENT"
-        )
+        if delivery == "failed":
+            event_type = "AI_EMAIL_FAILED"
+        elif exfiltration:
+            event_type = "AI_DATA_EXFILTRATION"
+        else:
+            event_type = {"blocked": "AI_EMAIL_BLOCKED", "simulated": "AI_EMAIL_SIMULATED", "sent": "AI_EMAIL_SENT"}[
+                delivery
+            ]
         await log_security_event(
             db=db,
             lab_instance_id=lab_instance_id,
@@ -143,17 +147,17 @@ async def generate_unified_stream(
                 "to": args.to_address,
                 "subject": args.subject,
                 "body": args.body,
-                "delivery": "failed" if not success else "simulated" if simulated else "sent",
+                "delivery": delivery,
                 "exfiltration_attempt": exfiltration,
             },
             source_ip="LLM_AGENT",
         )
-        if not success:
-            yield "\n\n*[SYSTEM]: Tool `send_email` failed. Could not dispatch email.*"
-        elif simulated:
-            yield "\n\n*[SYSTEM]: Tool `send_email` simulated successfully. No email was sent.*"
-        else:
-            yield f"\n\n*[SYSTEM]: Tool `send_email` sent email to {args.to_address}.*"
+        yield {
+            "failed": "\n\n*[SYSTEM]: Tool `send_email` failed. Could not dispatch email.*",
+            "blocked": "\n\n*[SYSTEM]: Tool `send_email` blocked: recipient is outside the lab mail domain.*",
+            "simulated": "\n\n*[SYSTEM]: Tool `send_email` simulated successfully. No email was sent.*",
+            "sent": f"\n\n*[SYSTEM]: Tool `send_email` sent email to {args.to_address}.*",
+        }[delivery]
 
 
 def get_llm_instance(request: Request):

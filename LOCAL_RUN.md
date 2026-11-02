@@ -26,7 +26,7 @@ If `.env` does not exist yet, copy `.env.example` to `.env`. Do not overwrite yo
 - `JWT_SECRET`: required, generate with `openssl rand -hex 32`. The API refuses to start with an empty value, a value shorter than 32 bytes, or a published example value: a known secret lets lab users forge Blue Team tokens and other labs' scopes.
 - `DATABASE_URL`, `REDIS_URL`: local connections consistent with your database setup.
 - `CHROMA_HOST=localhost`, `CHROMA_PORT=8000`.
-- `SMTP_HOST=`: leave empty for the first run. The email tool will simulate delivery and explicitly report that no email was sent.
+- `SMTP_HOST=`: leave empty for the first run. The email tool will simulate delivery and explicitly report that no email was sent. To see real messages, start the Mailpit sink (`docker compose -f docker-compose.compute.yml up -d mailpit`), set `SMTP_HOST=localhost`, `SMTP_PORT=1025`, `SMTP_STARTTLS=false`, and open http://localhost:8025. With any SMTP server, the agent can only email domains in `EMAIL_ALLOWED_DOMAINS` (default `lab.local`); other recipients are blocked and logged as `AI_EMAIL_BLOCKED`, or `AI_DATA_EXFILTRATION` when the message contains a flag.
 
 For an OpenAI-compatible inference server, configure these values in your local
 `.env` instead of using a Groq key as a local-server switch. Replace the URL and
