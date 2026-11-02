@@ -9,10 +9,16 @@ Run commands from the repository root. Use Python 3.11 or later. The frontend re
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -r backend/requirements-groq.txt
+python -m pip install -r backend/requirements-base.txt
 ```
 
-`requirements-groq.txt` contains the application dependencies without `llama-cpp-python`, including `langchain-openai` for the HTTP provider. The full `requirements.txt` includes this list and local llama-cpp support. HTTP generation does not require compiling a local LLM. Embeddings are still computed by the existing SentenceTransformer on CPU.
+| File | Use |
+| --- | --- |
+| `requirements-base.txt` | Application runtime for the OpenAI-compatible HTTP and Groq providers. Installs CPU-only torch: embeddings and the reranker run on CPU. |
+| `requirements.txt` | Base runtime plus `llama-cpp-python` for in-process GGUF inference. |
+| `requirements-test.txt` | Service-free test suite; no model weights or torch. |
+
+HTTP generation does not require compiling a local LLM. An existing environment with CUDA torch keeps working; recreate it to reclaim the space.
 
 If `.env` does not exist yet, copy `.env.example` to `.env`. Do not overwrite your own settings. Configure:
 
@@ -55,8 +61,8 @@ were checked separately against this server. SOC sends one schema tool with
 `tool_choice=required`, uses a complete nonstreaming response, and rejects malformed
 JSON, incomplete calls and nonboolean verdicts. Chat keeps streaming and tools.
 Failures propagate; the worker leaves unsuccessful analysis pending. These checks
-do not establish real Groq compatibility. See [verification results](ISSUE_61_VERIFICATION.md)
-for service checks and remaining blockers.
+do not establish real Groq compatibility. Service checks and remaining blockers
+are recorded in issue #61.
 
 ### Local CLI probe (delivered separately, ignored by Git)
 
@@ -256,7 +262,7 @@ The Node test command uses built-in TypeScript support in Node.js 24 and require
 7. Confirm that a Groq failure leaves the event uninvestigated and that the dashboard displays API errors, including token expiry.
 
 The checks above are a manual checklist, not a claim that every scenario passed.
-The [Issue #61 verification report](ISSUE_61_VERIFICATION.md) distinguishes actual
+The issue #61 verification report distinguishes actual
 model/PostgreSQL/Redis/Chroma/API checks from offline tests and blocked PDF/CTF/Groq
 scenarios. Learning data and CTF flags are not prepared by setup. Never use a
 working-directory change as database isolation: select a test database explicitly
