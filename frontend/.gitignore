@@ -34,4 +34,5 @@ local env files
 
 vercel
 
-.vercel*.tsbuildinfo
+.vercel
+*.tsbuildinfo
