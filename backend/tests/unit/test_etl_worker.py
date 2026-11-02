@@ -14,7 +14,11 @@ async def test_etl_marks_every_chunk_with_lab_id(monkeypatch):
     worker.vector_store = Mock()
     worker._chunk_text_with_overlap = Mock(return_value=["one", "two"])
     worker._estimate_tokens = Mock(return_value=1)
-    monkeypatch.setattr(etl_worker, "PdfReader", Mock(return_value=SimpleNamespace(pages=[SimpleNamespace(extract_text=lambda: "document")])) )
+    monkeypatch.setattr(
+        etl_worker,
+        "PdfReader",
+        Mock(return_value=SimpleNamespace(pages=[SimpleNamespace(extract_text=lambda: "document")])),
+    )
     lab_id = uuid4()
     result = await worker.process_pdf(b"stub", "test.pdf", uuid4(), AsyncMock(), lab_id)
     assert result == 2

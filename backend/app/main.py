@@ -32,6 +32,7 @@ blue_app = FastAPI(
 )
 blue_app.include_router(blue_router, prefix="")
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     queue_manager = LLMQueueManager()
@@ -74,13 +75,14 @@ async def lifespan(app: FastAPI):
             with suppress(asyncio.CancelledError):
                 await soc_task
 
+
 app = FastAPI(
     title="AI Security CyberRange API",
     description="Backend for the Vulnerable-by-Design AI CyberRange platform",
     version="1.0.0",
     docs_url=None,
     redoc_url=None,
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -94,10 +96,7 @@ app.add_middleware(
 app.mount("/api/red", red_app)
 app.mount("/api/blue", blue_app)
 
+
 @app.get("/api/health", tags=["System"])
 async def health_check():
-    return {
-        "status": "online",
-        "service": "AI CyberRange Core",
-        "message": "System initialized."
-    }
+    return {"status": "online", "service": "AI CyberRange Core", "message": "System initialized."}

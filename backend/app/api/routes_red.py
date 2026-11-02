@@ -37,6 +37,7 @@ from app.services.siem_logger import log_security_event
 
 router = APIRouter()
 
+
 @router.post("/login", tags=["Red Team Auth"])
 async def red_team_login(login_req: LoginRequest, db: AsyncSession = Depends(get_db)):
     user = await UserRepository.get_by_username(db, login_req.username)
@@ -50,8 +51,8 @@ async def red_team_login(login_req: LoginRequest, db: AsyncSession = Depends(get
     token_data = {
         "sub": user.username,
         "role": user.role,
-        "id":str(user.id),
-        "lab_instance_id": str(user.lab_instance_id)
+        "id": str(user.id),
+        "lab_instance_id": str(user.lab_instance_id),
     }
 
     token = create_access_token(data=token_data)
@@ -61,10 +62,11 @@ async def red_team_login(login_req: LoginRequest, db: AsyncSession = Depends(get
         db=db,
         lab_instance_id=str(user.lab_instance_id),
         event_type="RED_TEAM_LOGIN",
-        payload={"username": user.username, "status": "success"}
+        payload={"username": user.username, "status": "success"},
     )
 
     return {"access_token": token, "token_type": "bearer", "role": user.role}
+
 
 @router.post("/chat/ask", tags=["Red Team"])
 async def chat_ask(
@@ -75,7 +77,7 @@ async def chat_ask(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user_vulnerable),
     redis=Depends(get_redis),
-    llm_instance=Depends(get_llm_instance)
+    llm_instance=Depends(get_llm_instance),
 ):
     lab_id = user.get("lab_instance_id")
     client_ip = request.client.host
@@ -83,22 +85,15 @@ async def chat_ask(
     await get_authorized_session(db, chat_req.session_id, lab_id)
     await enforce_rate_limit(db=db, redis=redis, session_id=chat_req.session_id, client_ip=client_ip)
     # Validate thread ownership before streaming starts.
-    await ChatRepository.get_or_create_thread(
-        db, chat_req.thread_id, user["id"], chat_req.session_id, chat_req.prompt
-    )
-
+    await ChatRepository.get_or_create_thread(db, chat_req.thread_id, user["id"], chat_req.session_id, chat_req.prompt)
 
     # Log the LLM Prompt
     await log_security_event(
         db=db,
         lab_instance_id=lab_id,
         event_type="LLM_PROMPT",
-        payload={
-            "username": user.get("sub"),
-            "claimed_role": user.get("role"),
-            "prompt": chat_req.prompt
-        },
-        source_ip=client_ip
+        payload={"username": user.get("sub"), "claimed_role": user.get("role"), "prompt": chat_req.prompt},
+        source_ip=client_ip,
     )
 
     return StreamingResponse(
@@ -110,9 +105,11 @@ async def chat_ask(
             queue=queue,
             vector_store=vector_store,
             user=user,
-            llm_instance=llm_instance),
-        media_type="text/event-stream"
+            llm_instance=llm_instance,
+        ),
+        media_type="text/event-stream",
     )
+
 
 @router.get("/chat/history", tags=["Red Team"])
 async def search_chat_history(
@@ -120,7 +117,7 @@ async def search_chat_history(
     q: str = Query(..., description="Search query"),
     session_id: str = Query(..., description="Session ID"),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(get_current_user_vulnerable)
+    user: dict = Depends(get_current_user_vulnerable),
 ):
     lab_id = user.get("lab_instance_id", "00000000-0000-0000-0000-000000000000")
 
@@ -132,9 +129,8 @@ async def search_chat_history(
         lab_instance_id=lab_id,
         event_type="DB_QUERY",
         payload={"query_param": q, "target": "chat_history"},
-        source_ip=request.client.host
+        source_ip=request.client.host,
     )
-
 
     try:
         results, raw_query = await ChatRepository.search_chat_history_vulnerable(lab_id, session_id, q)
@@ -142,10 +138,14 @@ async def search_chat_history(
     except (HistoryQueryError, IsolationError) as e:
         # Search owns a separate transaction; this session remains usable for SIEM.
         await log_security_event(
-            db=db, lab_instance_id=lab_id, event_type="SQL_ERROR",
-            payload={"error": str(e), "failed_query": q}, source_ip=request.client.host
+            db=db,
+            lab_instance_id=lab_id,
+            event_type="SQL_ERROR",
+            payload={"error": str(e), "failed_query": q},
+            source_ip=request.client.host,
         )
         raise HTTPException(status_code=503 if isinstance(e, IsolationError) else 400, detail=str(e))
+
 
 @router.post("/upload", tags=["Red Team"])
 async def upload_document(
@@ -156,19 +156,20 @@ async def upload_document(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user_vulnerable),
     redis=Depends(get_redis),
-
 ):
     task_id = uuid.uuid4()
     redis_key = f"etl_job:{task_id}"
-    await redis.hset(redis_key, mapping={
-        "filename": file.filename,
-        "user_id": user["id"],
-        "lab_instance_id": user["lab_instance_id"],
-        "status": "Queued",
-        "progress": 0,
-        "message": "Queued..."
-    })
-
+    await redis.hset(
+        redis_key,
+        mapping={
+            "filename": file.filename,
+            "user_id": user["id"],
+            "lab_instance_id": user["lab_instance_id"],
+            "status": "Queued",
+            "progress": 0,
+            "message": "Queued...",
+        },
+    )
 
     # Keep the uploads -> student_uploads traversal exercise inside this lab.
     lab_root = os.path.realpath(os.path.join("lab_uploads", user["lab_instance_id"]))
@@ -194,28 +195,31 @@ async def upload_document(
             lab_instance_id=user.get("lab_instance_id"),
             event_type="FILE_UPLOAD_FAILED",
             payload={"filename": file.filename, "reason": "Path Traversal Blocked"},
-            source_ip=request.client.host
+            source_ip=request.client.host,
         )
         raise HTTPException(status_code=403, detail="Wrong directory.")
 
     os.makedirs(os.path.dirname(validated_path), exist_ok=True)
-    async with aiofiles.open(validated_path, 'wb') as out_file:
-            await out_file.write(content)
+    async with aiofiles.open(validated_path, "wb") as out_file:
+        await out_file.write(content)
 
     if any(os.path.commonpath([validated_path, root]) == root for root in absallowed):
-
         await log_security_event(
             db=db,
             lab_instance_id=user.get("lab_instance_id"),
             event_type="FILE_UPLOAD",
-            payload={"filename": file.filename, "destination": validated_path, 'indexing': 'true'},
-            source_ip=request.client.host
+            payload={"filename": file.filename, "destination": validated_path, "indexing": "true"},
+            source_ip=request.client.host,
         )
 
         try:
             etl = ETLWorker(vector_store)
             background_tasks.add_task(
-                etl.process_pdf, content, file.filename, task_id, redis,
+                etl.process_pdf,
+                content,
+                file.filename,
+                task_id,
+                redis,
                 uuid.UUID(user["lab_instance_id"]),
             )
 
@@ -224,32 +228,28 @@ async def upload_document(
             raise HTTPException(status_code=400, detail=str(e))
 
     else:
-
         await log_security_event(
             db=db,
             lab_instance_id=user.get("lab_instance_id"),
             event_type="FILE_UPLOAD",
             payload={"filename": file.filename, "destination": validated_path, "indexing": "false"},
-            source_ip=request.client.host
+            source_ip=request.client.host,
         )
 
-        await redis.hset(redis_key, mapping={
-            "status": "Completed (No ETL required)",
-            "progress": 100,
-            "message": "File uploaded securely."
-        })
+        await redis.hset(
+            redis_key,
+            mapping={"status": "Completed (No ETL required)", "progress": 100, "message": "File uploaded securely."},
+        )
 
-        return {
-            "task_id": str(task_id),
-            "message": "File uploaded successfully.",
-            "chunks_vectorized": 0
-        }
+        return {"task_id": str(task_id), "message": "File uploaded successfully.", "chunks_vectorized": 0}
 
 
 @router.websocket("/ws/etl-status/{task_id}")
 async def etl_status_websocket(
-    websocket: WebSocket, task_id: uuid.UUID,
-    redis: Redis = Depends(get_redis), db: AsyncSession = Depends(get_db),
+    websocket: WebSocket,
+    task_id: uuid.UUID,
+    redis: Redis = Depends(get_redis),
+    db: AsyncSession = Depends(get_db),
 ):
     try:
         user = await get_current_user_vulnerable(websocket.headers.get("authorization"), db)
@@ -268,7 +268,6 @@ async def etl_status_websocket(
             if not redis_data:
                 await websocket.close(code=1000)
                 break
-
 
             await websocket.send_json(redis_data)
             await asyncio.sleep(0.5)

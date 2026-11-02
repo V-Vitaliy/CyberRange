@@ -15,13 +15,18 @@ class MLAnalyzer:
     The model will run on CPU, consume ~20MB RAM, and classify text in milliseconds.
     Currently using compiled Regex patterns as a temporary heuristic WAF engine.
     """
+
     def __init__(self):
         # Compiled Regex rules for performance. (?i) enables case-insensitive matching.
-        self.sqli_regex = re.compile(r"(?i)(union\s+select|select\s+.*?\s+from|drop\s+table|insert\s+into|1\s*=\s*1|'a'\s*=\s*'a'|--)")
-        self.pi_regex = re.compile(r"(?i)(ignore\s+(all\s+)?previous|system\s+prompt|you\s+are\s+now|bypass\s+instructions)")
+        self.sqli_regex = re.compile(
+            r"(?i)(union\s+select|select\s+.*?\s+from|drop\s+table|insert\s+into|1\s*=\s*1|'a'\s*=\s*'a'|--)"
+        )
+        self.pi_regex = re.compile(
+            r"(?i)(ignore\s+(all\s+)?previous|system\s+prompt|you\s+are\s+now|bypass\s+instructions)"
+        )
         self.jwt_regex = re.compile(r"(?i)(\"alg\"\s*:\s*\"none\"|alg:\s*none|verify_signature\s*:\s*false)")
 
-    def predict_is_malicious(self, payload, event_type:str) -> bool:
+    def predict_is_malicious(self, payload, event_type: str) -> bool:
         """
         Simulates ML prediction.
         Future implementation: return self.model.predict([payload])[0] == 1
@@ -32,25 +37,21 @@ class MLAnalyzer:
             return False
 
         if event_type == "AUTH_BYPASS_ATTEMPT":
-            if payload.get('claimed_role') != 'red_team':
+            if payload.get("claimed_role") != "red_team":
                 return True
             return False
 
         payload_str = str(payload).lower()
-        return any([
-            self.sqli_regex.search(payload_str),
-            self.pi_regex.search(payload_str),
-            self.jwt_regex.search(payload_str)
-        ])
+        return any(
+            [self.sqli_regex.search(payload_str), self.pi_regex.search(payload_str), self.jwt_regex.search(payload_str)]
+        )
+
 
 analyzer = MLAnalyzer()
 
+
 async def process_investigation(
-    db: AsyncSession,
-    log_id: UUID,
-    is_malicious_claim: bool,
-    session_id: UUID,
-    user_id: UUID
+    db: AsyncSession, log_id: UUID, is_malicious_claim: bool, session_id: UUID, user_id: UUID
 ) -> InvestigateResponse:
     """
     Business logic layer: validates the log, calculates defense points,
@@ -99,8 +100,5 @@ async def process_investigation(
     await db.commit()
 
     return InvestigateResponse(
-        success=True,
-        message=message,
-        credits_awarded=credits_to_award,
-        new_balance=game_session.defense_budget
+        success=True, message=message, credits_awarded=credits_to_award, new_balance=game_session.defense_budget
     )
