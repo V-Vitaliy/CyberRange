@@ -59,6 +59,7 @@ Commands from the repository root:
 - Single group: `PYTHONPATH=backend python -m pytest -q -ra backend/tests/<group>`
 - Frontend: `node --test frontend/tests/*.test.mjs` (Node 24)
 - Types: `cd frontend && npx tsc --noEmit`
+- Lint and format: `ruff check .` and `ruff format .` (CI runs `ruff format --check .`)
 
 ## Workspace and data
 - Preserve existing user changes; never reset, discard or force-push others' work.
