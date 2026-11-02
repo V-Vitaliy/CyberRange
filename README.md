@@ -37,7 +37,7 @@ two-server deployment.
 | --- | --- |
 | PostgreSQL | `localhost:5432` |
 | Redis | `localhost:6379` |
-| Chroma | `localhost:8000` |
+| Chroma (Envoy token proxy, needs `CHROMA_AUTH_TOKEN`) | `localhost:8000` |
 | Backend | `http://127.0.0.1:8001` |
 | Red Team Swagger | `http://127.0.0.1:8001/api/red/docs` |
 | Blue Team Swagger | `http://127.0.0.1:8001/api/blue/docs` |
