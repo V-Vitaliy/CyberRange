@@ -1,6 +1,7 @@
-# Compute services. Chroma 1.x has no built-in authentication: it must only be
-# reachable by the backend. The port is published on COMPUTE_BIND_ADDRESS
-# (default 127.0.0.1); use a private interface address for a split deployment.
+# Compute services. Chroma 1.x has no built-in authentication, so it publishes no
+# port: the backend reaches it only through chroma-proxy, which requires
+# CHROMA_AUTH_TOKEN. Published ports use COMPUTE_BIND_ADDRESS (default 127.0.0.1);
+# use a private interface address for a split deployment.
 services:
   chromadb:
     image: chromadb/chroma:1.5.9
@@ -8,10 +9,30 @@ services:
     restart: unless-stopped
     environment:
       - IS_PERSISTENT=TRUE
-    ports:
-      - "${COMPUTE_BIND_ADDRESS:-127.0.0.1}:8000:8000"
     volumes:
       - chroma_data:/chroma/chroma
+
+  chroma-proxy:
+    image: envoyproxy/envoy:v1.40.2
+    container_name: cyberrange_chroma_proxy
+    restart: unless-stopped
+    depends_on:
+      - chromadb
+    environment:
+      CHROMA_AUTH_TOKEN: ${CHROMA_AUTH_TOKEN:?Set CHROMA_AUTH_TOKEN in .env}
+    volumes:
+      - ./deploy/envoy-chroma.yaml:/etc/envoy/chroma.template.yaml:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        case "$$CHROMA_AUTH_TOKEN" in
+          *[!A-Za-z0-9_-]*) echo "CHROMA_AUTH_TOKEN may contain only A-Z a-z 0-9 _ -" >&2; exit 1 ;;
+        esac
+        if [ $${#CHROMA_AUTH_TOKEN} -lt 32 ]; then echo "CHROMA_AUTH_TOKEN must be at least 32 characters" >&2; exit 1; fi
+        sed "s/__CHROMA_AUTH_TOKEN__/$$CHROMA_AUTH_TOKEN/" /etc/envoy/chroma.template.yaml > /tmp/chroma.yaml
+        exec envoy -c /tmp/chroma.yaml --log-level warn
+    ports:
+      - "${COMPUTE_BIND_ADDRESS:-127.0.0.1}:8000:8000"
 
   # Local mail sink for the agent's send_email tool: captures every message,
   # delivers nothing outside. Web UI on port 8025.

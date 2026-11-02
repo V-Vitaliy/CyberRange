@@ -1,0 +1,48 @@
+# Token proxy in front of Chroma (Chroma 1.x has no built-in authentication).
+# __CHROMA_AUTH_TOKEN__ is substituted at container start from the environment.
+static_resources:
+  listeners:
+    - name: chroma
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 8000 }
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: chroma
+                route_config:
+                  virtual_hosts:
+                    - name: chroma
+                      domains: ["*"]
+                      routes:
+                        - match: { prefix: "/" }
+                          # Bounds a hanging Chroma call instead of holding an ETL thread forever.
+                          route: { cluster: chroma, timeout: 60s }
+                http_filters:
+                  - name: envoy.filters.http.rbac
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.rbac.v3.RBAC
+                      rules:
+                        action: ALLOW
+                        policies:
+                          backend-token:
+                            permissions: [{ any: true }]
+                            principals:
+                              - header:
+                                  name: authorization
+                                  string_match: { exact: "Bearer __CHROMA_AUTH_TOKEN__" }
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+  clusters:
+    - name: chroma
+      type: STRICT_DNS
+      connect_timeout: 5s
+      load_assignment:
+        cluster_name: chroma
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address: { address: chromadb, port_value: 8000 }
