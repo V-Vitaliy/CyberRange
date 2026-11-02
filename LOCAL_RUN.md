@@ -23,9 +23,8 @@ HTTP generation does not require compiling a local LLM. An existing environment 
 If `.env` does not exist yet, copy `.env.example` to `.env`. Do not overwrite your own settings. Configure:
 
 - `GROQ_API_KEY`: your key, stored only in the local `.env`.
-- `JWT_SECRET`: your own random secret.
-- `POSTGRES_PASSWORD`, `REDIS_PASSWORD`: generate each with `openssl rand -hex 24`. Docker Compose refuses to start while they are empty.
-- `DATABASE_URL`, `REDIS_URL`: replace the `<POSTGRES_PASSWORD>` and `<REDIS_PASSWORD>` placeholders with the same passwords.
+- `JWT_SECRET`: required, generate with `openssl rand -hex 32`. The API refuses to start with an empty value, a value shorter than 32 bytes, or a published example value: a known secret lets lab users forge Blue Team tokens and other labs' scopes.
+- `DATABASE_URL`, `REDIS_URL`: local connections consistent with your database setup.
 - `CHROMA_HOST=localhost`, `CHROMA_PORT=8000`.
 - `SMTP_HOST=`: leave empty for the first run. The email tool will simulate delivery and explicitly report that no email was sent.
 

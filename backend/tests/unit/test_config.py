@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 from pydantic import ValidationError
 
-from app.core.config import ROOT_DIR, Settings
+from app.core.config import ROOT_DIR, Settings, require_strong_jwt_secret
 
 
 class TestSettings(unittest.TestCase):
@@ -85,3 +85,16 @@ def test_http_connection_settings_are_loaded_from_env_file(tmp_path):
     assert settings.LLM_MODEL == "custom-model-id"
     assert settings.LLM_API_KEY == ""
     assert settings.LLM_MAX_TOKENS == 3072
+
+
+@pytest.mark.parametrize(
+    "secret",
+    ["", "short-secret", "super-secret-blue-team-key", "replace_this_with_a_long_random_string_in_production"],
+)
+def test_weak_or_published_jwt_secret_is_rejected(secret):
+    with pytest.raises(RuntimeError, match="JWT_SECRET"):
+        require_strong_jwt_secret(secret)
+
+
+def test_random_jwt_secret_is_accepted():
+    require_strong_jwt_secret("a" * 32)
