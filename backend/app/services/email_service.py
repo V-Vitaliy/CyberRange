@@ -6,10 +6,12 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+
 class EmailService:
     """
     Handles real email dispatching via SMTP.
     """
+
     @staticmethod
     def send_real_email(to_address: str, subject: str, body: str) -> bool:
         try:

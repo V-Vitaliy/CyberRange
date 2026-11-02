@@ -11,6 +11,7 @@ from app.db.models import GameSession, SecurityAuditLog
 
 logger = logging.getLogger(__name__)
 
+
 async def run_soc_analyst_loop(soc_graph, queue):
     """
     Continuous background task that polls the database for uninvestigated security logs.
@@ -24,10 +25,7 @@ async def run_soc_analyst_loop(soc_graph, queue):
                 stmt = (
                     select(SecurityAuditLog)
                     .join(GameSession, SecurityAuditLog.lab_instance_id == GameSession.lab_instance_id)
-                    .where(
-                        SecurityAuditLog.investigated_at.is_(None),
-                        GameSession.is_solo.is_(True)
-                    )
+                    .where(SecurityAuditLog.investigated_at.is_(None), GameSession.is_solo.is_(True))
                     .order_by(SecurityAuditLog.timestamp)
                     .with_for_update(skip_locked=True, of=SecurityAuditLog)
                     .limit(5)
@@ -36,13 +34,12 @@ async def run_soc_analyst_loop(soc_graph, queue):
                 logs_to_process = result.scalars().all()
 
                 for log in logs_to_process:
-
                     initial_state = {
                         "log_id": str(log.id),
                         "event_type": log.event_type,
                         "payload": str(log.payload),
                         "is_malicious": False,
-                        "reasoning": ""
+                        "reasoning": "",
                     }
 
                     try:

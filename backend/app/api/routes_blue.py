@@ -23,6 +23,7 @@ from app.services.forensics import process_investigation
 
 router = APIRouter()
 
+
 @router.post("/login", response_model=TokenResponse, tags=["Blue Team - User"])
 async def login_blue_team(login_data: LoginRequest, db: AsyncSession = Depends(get_db)):
     """Authenticates a Blue Team user and returns a signed JWT."""
@@ -38,15 +39,13 @@ async def login_blue_team(login_data: LoginRequest, db: AsyncSession = Depends(g
         "sub": user.username,
         "id": str(user.id),
         "role": user.role,
-        "lab_instance_id": str(user.lab_instance_id)
+        "lab_instance_id": str(user.lab_instance_id),
     }
 
-    access_token = create_access_token(
-        data=token_data,
-        expires_delta=timedelta(minutes=60)
-    )
+    access_token = create_access_token(data=token_data, expires_delta=timedelta(minutes=60))
 
     return {"access_token": access_token, "token_type": "bearer"}
+
 
 @router.get("/me", tags=["Blue Team - User"])
 async def get_my_profile(
@@ -59,28 +58,26 @@ async def get_my_profile(
         "username": current_user.username,
         "role": current_user.role,
         "session_id": str(session.id) if session else None,
-        "message": "Welcome to the secure Blue Team zone."
+        "message": "Welcome to the secure Blue Team zone.",
     }
+
 
 @router.post("/defenses/buy", response_model=BuyDefenseResponse, tags=["Blue Team - Shop"])
 async def buy_defense(
     request_data: BuyDefenseRequest,
     current_user: User = Depends(get_blue_team_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """Allows Blue Team to spend their defense budget on security patches."""
     await get_authorized_session(db, request_data.session_id, current_user.lab_instance_id)
     return await process_defense_purchase(
-        db=db,
-        session_id=request_data.session_id,
-        defense_type=request_data.defense_type
+        db=db, session_id=request_data.session_id, defense_type=request_data.defense_type
     )
+
 
 @router.post("/investigate", response_model=InvestigateResponse, tags=["Blue Team - Forensics"])
 async def investigate_log(
-    req: InvestigateRequest,
-    current_user: User = Depends(get_blue_team_user),
-    db: AsyncSession = Depends(get_db)
+    req: InvestigateRequest, current_user: User = Depends(get_blue_team_user), db: AsyncSession = Depends(get_db)
 ):
     """Processes a log investigation and awards points if the verdict is correct."""
     await get_authorized_session(db, req.session_id, current_user.lab_instance_id)
@@ -89,14 +86,15 @@ async def investigate_log(
         log_id=req.log_id,
         is_malicious_claim=req.is_malicious,
         session_id=req.session_id,
-        user_id=current_user.id
+        user_id=current_user.id,
     )
+
 
 @router.get("/dashboard", response_model=DashboardStatsResponse, tags=["Blue Team - Dashboard"])
 async def get_dashboard_stats(
     session_id: str = Query(..., description="Current game session ID"),
     current_user: User = Depends(get_blue_team_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """Aggregates metrics for the Blue Team React Dashboard (KPI cards)."""
     game_session = await get_authorized_session(db, session_id, current_user.lab_instance_id)
@@ -108,23 +106,20 @@ async def get_dashboard_stats(
         "prompt_hardening_enabled": game_session.system_prompt != "You are a helpful university assistant.",
         "rate_limit_enabled": game_session.rate_limit_enabled,
         "reranker_enabled": game_session.use_reranker,
-        "jwt_filter_enabled": game_session.jwt_filter_enabled
+        "jwt_filter_enabled": game_session.jwt_filter_enabled,
     }
 
     stats = await AuditLogRepository.get_stats(db, game_session.lab_instance_id)
 
-    return DashboardStatsResponse(
-        budget=game_session.defense_budget,
-        active_defenses=active_defenses,
-        **stats
-    )
+    return DashboardStatsResponse(budget=game_session.defense_budget, active_defenses=active_defenses, **stats)
+
 
 @router.get("/logs", response_model=List[AuditLogEntry], tags=["Blue Team - SIEM"])
 async def get_audit_logs(
     session_id: str = Query(..., description="Current game session ID"),
     limit: int = Query(50, ge=1, le=500, description="Max number of logs to fetch"),
     current_user: User = Depends(get_blue_team_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """Fetches raw SIEM logs for the investigation table."""
     game_session = await get_authorized_session(db, session_id, current_user.lab_instance_id)

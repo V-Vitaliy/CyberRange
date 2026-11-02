@@ -1,4 +1,5 @@
 """Red Team routes with mocked storage; not evidence of PostgreSQL isolation."""
+
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -24,6 +25,7 @@ async def test_history_route_requires_authentication(client):
         yield object()
 
     from app.main import red_app
+
     red_app.dependency_overrides[get_db] = database
     try:
         response = await client.get("/api/red/chat/history", params={"q": "hello", "session_id": str(uuid4())})
@@ -76,9 +78,7 @@ async def _request_history(client, user, session_id):
     overrides[get_current_user_vulnerable] = current_user
     overrides[get_db] = database
     try:
-        response = await client.get(
-            "/api/red/chat/history", params={"q": "history", "session_id": session_id}
-        )
+        response = await client.get("/api/red/chat/history", params={"q": "history", "session_id": session_id})
     finally:
         overrides.clear()
         overrides.update(prior)
@@ -132,20 +132,24 @@ async def test_history_malformed_session_id_rejected_before_search(client, monke
 @pytest.fixture
 def history(monkeypatch):
     lab, session = uuid4(), uuid4()
-    user = {'id': str(uuid4()), 'lab_instance_id': str(lab), 'role': 'red_team'}
+    user = {"id": str(uuid4()), "lab_instance_id": str(lab), "role": "red_team"}
     db = object()
+
     async def current_user():
         return user
+
     async def database():
         yield db
+
     prior = dict(red_app.dependency_overrides)
     red_app.dependency_overrides.update({get_db: database, get_current_user_vulnerable: current_user})
-    monkeypatch.setattr(GameSessionRepository, 'get_by_id', AsyncMock(
-        return_value=SimpleNamespace(lab_instance_id=lab)))
-    search = AsyncMock(return_value=([{'title': 'normal', 'messages': []}], 'synthetic SQL'))
-    monkeypatch.setattr(ChatRepository, 'search_chat_history_vulnerable', search)
+    monkeypatch.setattr(
+        GameSessionRepository, "get_by_id", AsyncMock(return_value=SimpleNamespace(lab_instance_id=lab))
+    )
+    search = AsyncMock(return_value=([{"title": "normal", "messages": []}], "synthetic SQL"))
+    monkeypatch.setattr(ChatRepository, "search_chat_history_vulnerable", search)
     log = AsyncMock()
-    monkeypatch.setattr(routes_red, 'log_security_event', log)
+    monkeypatch.setattr(routes_red, "log_security_event", log)
     try:
         yield SimpleNamespace(lab=lab, session=session, search=search, log=log, db=db)
     finally:
@@ -154,46 +158,53 @@ def history(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('query', ['normal', "' OR TRUE --"])
+@pytest.mark.parametrize("query", ["normal", "' OR TRUE --"])
 async def test_history_awaits_lab_search_and_preserves_response(history, query):
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
-        response = await client.get('/api/red/chat/history', params={'q': query, 'session_id': str(history.session)})
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/api/red/chat/history", params={"q": query, "session_id": str(history.session)})
     assert response.status_code == 200
-    assert response.json() == {'results': [{'title': 'normal', 'messages': []}]}
+    assert response.json() == {"results": [{"title": "normal", "messages": []}]}
     history.search.assert_awaited_once_with(str(history.lab), str(history.session), query)
     history.log.assert_awaited_once()
     event = history.log.call_args.kwargs
-    assert event['event_type'] == 'DB_QUERY'
-    assert event['payload'] == {'query_param': query, 'target': 'chat_history'}
-    assert event['db'] is history.db
+    assert event["event_type"] == "DB_QUERY"
+    assert event["payload"] == {"query_param": query, "target": "chat_history"}
+    assert event["db"] is history.db
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('error,status', [
-    (HistoryQueryError('SQL syntax error [42601]'), 400),
-    (IsolationError('Restricted lab connection missing.'), 503),
-])
+@pytest.mark.parametrize(
+    "error,status",
+    [
+        (HistoryQueryError("SQL syntax error [42601]"), 400),
+        (IsolationError("Restricted lab connection missing."), 503),
+    ],
+)
 async def test_history_logs_error_and_next_request_works(history, error, status):
-    history.search.side_effect = [error, ([{'title': 'recovered'}], 'synthetic SQL')]
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
-        failed = await client.get('/api/red/chat/history', params={'q': "'", 'session_id': str(history.session)})
-        recovered = await client.get('/api/red/chat/history', params={'q': 'normal', 'session_id': str(history.session)})
+    history.search.side_effect = [error, ([{"title": "recovered"}], "synthetic SQL")]
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        failed = await client.get("/api/red/chat/history", params={"q": "'", "session_id": str(history.session)})
+        recovered = await client.get(
+            "/api/red/chat/history", params={"q": "normal", "session_id": str(history.session)}
+        )
     assert failed.status_code == status
-    assert failed.json() == {'detail': str(error)}
+    assert failed.json() == {"detail": str(error)}
     assert recovered.status_code == 200
-    assert recovered.json() == {'results': [{'title': 'recovered'}]}
-    assert [call.kwargs['event_type'] for call in history.log.await_args_list] == [
-        'DB_QUERY', 'SQL_ERROR', 'DB_QUERY']
-    assert history.log.await_args_list[1].kwargs['payload'] == {'error': str(error), 'failed_query': "'"}
+    assert recovered.json() == {"results": [{"title": "recovered"}]}
+    assert [call.kwargs["event_type"] for call in history.log.await_args_list] == ["DB_QUERY", "SQL_ERROR", "DB_QUERY"]
+    assert history.log.await_args_list[1].kwargs["payload"] == {"error": str(error), "failed_query": "'"}
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("filename,expected,indexed", [
-    ("normal.pdf", 200, False),
-    ("../student_uploads/poison.pdf", 200, True),
-    ("../../outside.pdf", 403, False),
-    ("../student_uploads-other/outside.pdf", 403, False),
-])
+@pytest.mark.parametrize(
+    "filename,expected,indexed",
+    [
+        ("normal.pdf", 200, False),
+        ("../student_uploads/poison.pdf", 200, True),
+        ("../../outside.pdf", 403, False),
+        ("../student_uploads-other/outside.pdf", 403, False),
+    ],
+)
 async def test_upload_keeps_traversal_exercise_inside_own_lab(monkeypatch, tmp_path, filename, expected, indexed):
     monkeypatch.chdir(tmp_path)
     user = dict(id=str(uuid4()), lab_instance_id=str(uuid4()), role="red_team")
@@ -231,11 +242,19 @@ async def test_upload_keeps_traversal_exercise_inside_own_lab(monkeypatch, tmp_p
     async def vector_store():
         return Mock()
 
-    red_app.dependency_overrides.update({get_current_user_vulnerable: current_user, get_db: database,
-                                         get_redis: redis_dependency, get_vector_store: vector_store})
+    red_app.dependency_overrides.update(
+        {
+            get_current_user_vulnerable: current_user,
+            get_db: database,
+            get_redis: redis_dependency,
+            get_vector_store: vector_store,
+        }
+    )
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-            response = await client.post("/api/red/upload", files={"file": (filename, b"isolated test", "application/pdf")})
+            response = await client.post(
+                "/api/red/upload", files={"file": (filename, b"isolated test", "application/pdf")}
+            )
     finally:
         red_app.dependency_overrides.clear()
     assert response.status_code == expected

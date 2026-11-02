@@ -70,18 +70,18 @@ def test_provider_settings_are_explicit_and_legacy_default_is_preserved(monkeypa
 
 
 def test_http_connection_settings_are_loaded_from_env_file(tmp_path):
-    env = tmp_path / '.env'
+    env = tmp_path / ".env"
     env.write_text(
-        'LLM_PROVIDER=openai_compatible\n'
-        'LLM_BASE_URL=http://inference.invalid:9001/v1\n'
-        'LLM_MODEL=custom-model-id\n'
-        'LLM_API_KEY=\n'
-        'LLM_MAX_TOKENS=3072\n'
+        "LLM_PROVIDER=openai_compatible\n"
+        "LLM_BASE_URL=http://inference.invalid:9001/v1\n"
+        "LLM_MODEL=custom-model-id\n"
+        "LLM_API_KEY=\n"
+        "LLM_MAX_TOKENS=3072\n"
     )
     with patch.dict(os.environ, {}, clear=True):
         settings = Settings(_env_file=env)
-    assert settings.LLM_PROVIDER == 'openai_compatible'
-    assert settings.LLM_BASE_URL == 'http://inference.invalid:9001/v1'
-    assert settings.LLM_MODEL == 'custom-model-id'
-    assert settings.LLM_API_KEY == ''
+    assert settings.LLM_PROVIDER == "openai_compatible"
+    assert settings.LLM_BASE_URL == "http://inference.invalid:9001/v1"
+    assert settings.LLM_MODEL == "custom-model-id"
+    assert settings.LLM_API_KEY == ""
     assert settings.LLM_MAX_TOKENS == 3072

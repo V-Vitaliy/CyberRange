@@ -8,12 +8,7 @@ from app.db.repository import GameSessionRepository
 from app.services.siem_logger import log_security_event
 
 
-async def enforce_rate_limit(
-    db: AsyncSession,
-    redis: Redis,
-    session_id: UUID,
-    client_ip: str
-) -> None:
+async def enforce_rate_limit(db: AsyncSession, redis: Redis, session_id: UUID, client_ip: str) -> None:
     session = await GameSessionRepository.get_by_id(db, session_id)
 
     if not session or not session.rate_limit_enabled:
@@ -40,12 +35,11 @@ async def enforce_rate_limit(
             payload={
                 "current_requests": current_requests,
                 "limit": session.rate_limit_rpm,
-                "description": "Rate limit exceeded. Potential DoS or Sponge Bomb attack."
+                "description": "Rate limit exceeded. Potential DoS or Sponge Bomb attack.",
             },
-            source_ip=client_ip
+            source_ip=client_ip,
         )
 
         raise HTTPException(
-            status_code=429,
-            detail="Too Many Requests. The Blue Team's Active WAF has temporarily blocked your IP."
+            status_code=429, detail="Too Many Requests. The Blue Team's Active WAF has temporarily blocked your IP."
         )

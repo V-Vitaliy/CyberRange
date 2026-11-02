@@ -3,6 +3,7 @@
 Storage and transaction doubles exercise the seed without importing backend
 dependencies, opening sockets, creating .env or running any services.
 """
+
 import copy
 import io
 import json
@@ -47,6 +48,7 @@ class Store:
 
 class Engine:
     """Transaction double: snapshots rows, including rollback on failed commit."""
+
     def __init__(self, store):
         self.store = store
         self.commit_error = None
@@ -98,9 +100,17 @@ class SeedTests(unittest.IsolatedAsyncioTestCase):
         async def session(**kwargs):
             self.assertIs(kwargs["bind"], self.engine)
             yield self.store
+
         return await setup.seed_transaction(
-            self.engine, session, SimpleNamespace(create_all=Mock()), str,
-            lambda db: db, options or self.options, self.passwords, self.hasher)
+            self.engine,
+            session,
+            SimpleNamespace(create_all=Mock()),
+            str,
+            lambda db: db,
+            options or self.options,
+            self.passwords,
+            self.hasher,
+        )
 
     async def test_clean_seed_has_explicit_ids_roles_and_hashed_passwords(self):
         report = await self.run_seed()
@@ -109,8 +119,7 @@ class SeedTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(red.id)
         self.assertEqual(game.team_id, red.id)
         self.assertEqual([red.role, blue.role], ["red_team", "blue_team"])
-        self.assertTrue(all(row.lab_instance_id == self.options.lab_id
-                            for row in (red, blue, game)))
+        self.assertTrue(all(row.lab_instance_id == self.options.lab_id for row in (red, blue, game)))
         self.assertEqual(game.defense_budget, 5)
         self.assertTrue(game.is_solo)
         self.assertEqual(report["session_id"], str(game.id))
@@ -205,25 +214,39 @@ class CliTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True), patch("sys.stdin.isatty", return_value=False):
             with self.assertRaises(setup.SetupError):
                 setup.read_password("blue_team")
-        with patch.dict(os.environ, {}, clear=True), patch("sys.stdin.isatty", return_value=True), \
-                patch.object(setup.getpass, "getpass", return_value=" hidden "):
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch("sys.stdin.isatty", return_value=True),
+            patch.object(setup.getpass, "getpass", return_value=" hidden "),
+        ):
             self.assertEqual(setup.read_password("blue_team"), " hidden ")
 
     def test_validation(self):
         options = setup.Options(uuid4())
-        for invalid in (replace(options, red_username=""), replace(options, budget=-1),
-                        replace(options, blue_username=options.red_username),
-                        replace(options, lab_id="bad"), replace(options, team_id="bad")):
+        for invalid in (
+            replace(options, red_username=""),
+            replace(options, budget=-1),
+            replace(options, blue_username=options.red_username),
+            replace(options, lab_id="bad"),
+            replace(options, team_id="bad"),
+        ):
             with self.subTest(invalid=invalid), self.assertRaises(setup.SetupError):
                 invalid.validate()
 
     def test_cli_errors_hide_secrets_and_return_nonzero(self):
-        for error in (ConnectionRefusedError("secret-dsn"), TimeoutError("secret-dsn"),
-                      ValueError("secret-dsn"), RuntimeError("secret-dsn"),
-                      ImportError("secret-dsn")):
+        for error in (
+            ConnectionRefusedError("secret-dsn"),
+            TimeoutError("secret-dsn"),
+            ValueError("secret-dsn"),
+            RuntimeError("secret-dsn"),
+            ImportError("secret-dsn"),
+        ):
             output = io.StringIO()
-            with patch.object(setup, "run_setup", AsyncMock(side_effect=error)), \
-                    redirect_stderr(output), redirect_stdout(output):
+            with (
+                patch.object(setup, "run_setup", AsyncMock(side_effect=error)),
+                redirect_stderr(output),
+                redirect_stdout(output),
+            ):
                 code = setup.main(["--lab-id", str(uuid4())])
             self.assertEqual(code, 1)
             self.assertIn("admin_setup:", output.getvalue())

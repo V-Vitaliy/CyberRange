@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 MODEL_PATH = os.path.join(os.path.dirname(__file__), settings.LLM_MODEL_PATH)
 
 
-
 def init_llm() -> ChatLlamaCpp:
     """
     Initializes the Llama-3 model into VRAM using llama-cpp-python.
@@ -37,11 +36,12 @@ def init_llm() -> ChatLlamaCpp:
         temperature=0.1,
         max_tokens=512,
         verbose=False,
-        streaming=True
+        streaming=True,
     )
-    
+
     print("Local LangChain Model loaded successfully!")
     return llm
+
 
 def init_openai_compatible() -> ChatOpenAI:
     """Use the chat-completions API, including for models without cloud keys."""
@@ -64,24 +64,19 @@ def init_openai_compatible() -> ChatOpenAI:
 def init_groq() -> ChatGroq:
     logger.info("Initializing Groq API via LangChain...")
     return ChatGroq(
-        api_key=settings.GROQ_API_KEY,
-        model="llama-3.1-8b-instant",
-        temperature=0.1,
-        max_tokens=512,
-        streaming=True
+        api_key=settings.GROQ_API_KEY, model="llama-3.1-8b-instant", temperature=0.1, max_tokens=512, streaming=True
     )
 
+
 async def generate_unified_stream(
-        llm_instance,
-        system_prompt: str,
-        human_prompt: str,
-        db: AsyncSession,
-        lab_instance_id: str| uuid.UUID,):
+    llm_instance,
+    system_prompt: str,
+    human_prompt: str,
+    db: AsyncSession,
+    lab_instance_id: str | uuid.UUID,
+):
     """Yields tokens from the LLM asynchronously to prevent event loop blocking."""
-    messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=human_prompt)
-        ]
+    messages = [SystemMessage(content=system_prompt), HumanMessage(content=human_prompt)]
 
     # Bind only the chat request; SOC retains the unbound base model.
     try:
@@ -99,8 +94,7 @@ async def generate_unified_stream(
 
     if response is not None and response.response_metadata.get("finish_reason") == "length":
         raise RuntimeError(
-            "Model output limit reached before completion. "
-            "For the OpenAI-compatible provider, increase LLM_MAX_TOKENS."
+            "Model output limit reached before completion. For the OpenAI-compatible provider, increase LLM_MAX_TOKENS."
         )
     if response is None or (not has_text and not response.tool_call_chunks):
         raise RuntimeError("Model returned no answer or tool call.")
@@ -115,7 +109,8 @@ async def generate_unified_stream(
             args = send_email.args_schema.model_validate(raw_args, strict=True)
         except (ValueError, TypeError):
             await log_security_event(
-                db=db, lab_instance_id=lab_instance_id,
+                db=db,
+                lab_instance_id=lab_instance_id,
                 event_type="AI_TOOL_FAILED",
                 payload={"tool": call.get("name"), "reason": "Invalid tool or arguments"},
                 source_ip="LLM_AGENT",
@@ -125,24 +120,32 @@ async def generate_unified_stream(
 
         simulated = not settings.SMTP_HOST
         try:
-            success = await asyncio.to_thread(
-                EmailService.send_real_email, args.to_address, args.subject, args.body
-            )
+            success = await asyncio.to_thread(EmailService.send_real_email, args.to_address, args.subject, args.body)
         except Exception:
             logger.exception("Email tool failed")
             success = False
 
         exfiltration = "flag{" in args.body.lower() or "flag{" in args.subject.lower()
         event_type = (
-            "AI_EMAIL_FAILED" if not success else
-            "AI_DATA_EXFILTRATION" if exfiltration else
-            "AI_EMAIL_SIMULATED" if simulated else "AI_EMAIL_SENT"
+            "AI_EMAIL_FAILED"
+            if not success
+            else "AI_DATA_EXFILTRATION"
+            if exfiltration
+            else "AI_EMAIL_SIMULATED"
+            if simulated
+            else "AI_EMAIL_SENT"
         )
         await log_security_event(
-            db=db, lab_instance_id=lab_instance_id, event_type=event_type,
-            payload={"to": args.to_address, "subject": args.subject, "body": args.body,
-                     "delivery": "failed" if not success else "simulated" if simulated else "sent",
-                     "exfiltration_attempt": exfiltration},
+            db=db,
+            lab_instance_id=lab_instance_id,
+            event_type=event_type,
+            payload={
+                "to": args.to_address,
+                "subject": args.subject,
+                "body": args.body,
+                "delivery": "failed" if not success else "simulated" if simulated else "sent",
+                "exfiltration_attempt": exfiltration,
+            },
             source_ip="LLM_AGENT",
         )
         if not success:
