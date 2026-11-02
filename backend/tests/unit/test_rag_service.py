@@ -1,4 +1,5 @@
 import json
+import threading
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
@@ -52,8 +53,8 @@ async def test_reranker_switch_and_system_prompt_reach_generation(monkeypatch, e
     reranker.predict.return_value = [-1, 2]
     monkeypatch.setattr(rag_service, "get_reranker", Mock(return_value=reranker))
 
-    async def in_thread(function, *args):
-        return function(*args)
+    async def in_thread(function, *args, **kwargs):
+        return function(*args, **kwargs)
 
     monkeypatch.setattr(rag_service.asyncio, "to_thread", in_thread)
     captured = {}
@@ -183,3 +184,69 @@ async def test_chat_failure_hides_internal_details_from_client(monkeypatch, capl
     assert not any(secret in "".join(parts) for secret in ("hunter2", "10.0.0.5", "postgresql"))
     assert any(internal in record.getMessage() + str(record.exc_info) for record in caplog.records)
     history.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_document_search_runs_off_the_event_loop(monkeypatch):
+    session = SimpleNamespace(lab_instance_id=uuid4(), use_reranker=False, system_prompt="test")
+    monkeypatch.setattr(rag_service, "get_authorized_session", AsyncMock(return_value=session))
+    monkeypatch.setattr(ChatRepository, "get_or_create_thread", AsyncMock())
+    monkeypatch.setattr(ChatRepository, "append_messages", AsyncMock())
+
+    async def stream(**kwargs):
+        yield "answer"
+
+    monkeypatch.setattr(rag_service, "generate_unified_stream", stream)
+    threads = []
+
+    def search(*args, **kwargs):
+        threads.append(threading.get_ident())
+        assert not threading.current_thread().name.startswith("etl")
+        return {"documents": [[]]}
+
+    store = SimpleNamespace(search_documents=Mock(side_effect=search))
+    user = dict(id=str(uuid4()), sub="student", role="admin", lab_instance_id=str(session.lab_instance_id))
+    parts = [
+        part
+        async for part in rag_service.generate_chat_response_sse(
+            object(), uuid4(), uuid4(), "question", LLMQueueManager(), store, user, object()
+        )
+    ]
+    assert parts[-1] == "data: [DONE]\n\n"
+    assert threads and threads[0] != threading.get_ident()
+    assert store.search_documents.call_args.kwargs["where"] == {"lab_instance_id": str(session.lab_instance_id)}
+
+
+@pytest.mark.asyncio
+async def test_reranker_loading_and_scoring_run_off_the_event_loop(monkeypatch):
+    session = SimpleNamespace(lab_instance_id=uuid4(), use_reranker=True, system_prompt="test")
+    monkeypatch.setattr(rag_service, "get_authorized_session", AsyncMock(return_value=session))
+    monkeypatch.setattr(ChatRepository, "get_or_create_thread", AsyncMock())
+    monkeypatch.setattr(ChatRepository, "append_messages", AsyncMock())
+
+    async def stream(**kwargs):
+        yield "answer"
+
+    monkeypatch.setattr(rag_service, "generate_unified_stream", stream)
+    threads = {}
+
+    def predict(pairs):
+        threads["predict"] = threading.get_ident()
+        return [1.0 for _ in pairs]
+
+    def load():
+        threads["load"] = threading.get_ident()
+        return SimpleNamespace(predict=predict)
+
+    monkeypatch.setattr(rag_service, "get_reranker", load)
+    store = SimpleNamespace(search_documents=Mock(return_value={"documents": [["context"]]}))
+    user = dict(id=str(uuid4()), sub="student", role="admin", lab_instance_id=str(session.lab_instance_id))
+    parts = [
+        part
+        async for part in rag_service.generate_chat_response_sse(
+            object(), uuid4(), uuid4(), "question", LLMQueueManager(), store, user, object()
+        )
+    ]
+    assert parts[-1] == "data: [DONE]\n\n"
+    assert threading.get_ident() not in (threads.get("load"), threads.get("predict"))
+    assert set(threads) == {"load", "predict"}

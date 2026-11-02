@@ -14,8 +14,8 @@ def harness(monkeypatch):
     delivery = Mock(return_value=True)
     monkeypatch.setattr(EmailService, "send_real_email", delivery)
 
-    async def in_thread(function, *args):
-        return function(*args)
+    async def in_thread(function, *args, **kwargs):
+        return function(*args, **kwargs)
 
     monkeypatch.setattr(email_tool.asyncio, "to_thread", in_thread)
     return audit, delivery

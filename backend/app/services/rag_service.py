@@ -29,6 +29,11 @@ def get_reranker():
     return _reranker
 
 
+def _rerank(prompt: str, documents: list[str]):
+    # Runs in a worker thread: the first call also loads the model.
+    return get_reranker().predict([[prompt, doc] for doc in documents])
+
+
 async def generate_chat_response_sse(
     db: AsyncSession,
     session_id: UUID,
@@ -57,15 +62,14 @@ async def generate_chat_response_sse(
         lab_filter = {"lab_instance_id": str(session.lab_instance_id)}
         where = lab_filter if user.get("role") == "admin" else {"$and": [lab_filter, {"access_level": "public"}]}
 
-        retrieved_docs = vector_store.search_documents(prompt, n_results=5, where=where)
+        retrieved_docs = await asyncio.to_thread(vector_store.search_documents, prompt, n_results=5, where=where)
         context_texts = []
 
         if retrieved_docs and retrieved_docs.get("documents") and len(retrieved_docs["documents"]) > 0:
             context_texts = [doc for doc in retrieved_docs["documents"][0] if doc]
 
         if session.use_reranker and context_texts:
-            pairs = [[prompt, doc] for doc in context_texts]
-            scores = await asyncio.to_thread(get_reranker().predict, pairs)
+            scores = await asyncio.to_thread(_rerank, prompt, context_texts)
             scored_docs = list(zip(scores, context_texts))
             scored_docs.sort(key=lambda x: x[0], reverse=True)
             context_texts = [doc for score, doc in scored_docs[:2] if score > 0]
