@@ -3,6 +3,7 @@ import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
+import httpx
 import openai
 from langchain_core.exceptions import ModelConnectionError
 from sqlalchemy import select
@@ -18,11 +19,23 @@ SOC_POLL_SECONDS = 5
 SOC_MAX_BACKOFF_SECONDS = 60
 
 
+NETWORK_ERRORS = (
+    ModelConnectionError,
+    openai.APIConnectionError,
+    httpx.TransportError,
+    ConnectionError,
+    TimeoutError,
+)
+
+
 def is_connection_error(error: BaseException | None) -> bool:
-    """True when the model server could not be reached, including wrapped network errors."""
+    """True when the model server could not be reached, including wrapped network errors.
+
+    Only network failures count; other errors (e.g. file system) are reported per event.
+    """
     seen = set()
     while error is not None and id(error) not in seen:
-        if isinstance(error, (ModelConnectionError, openai.APIConnectionError, OSError)):
+        if isinstance(error, NETWORK_ERRORS):
             return True
         seen.add(id(error))
         error = error.__cause__ or error.__context__
