@@ -2,7 +2,6 @@ import sys
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-import chromadb
 import pytest
 
 from app.db import chroma_client
@@ -10,8 +9,10 @@ from app.db import chroma_client
 
 @pytest.fixture
 def doubles(monkeypatch):
+    # chromadb is not installed in the light test environment; the real client is checked in CI compose.
     client = Mock()
-    monkeypatch.setattr(chromadb, "HttpClient", client)
+    monkeypatch.setitem(sys.modules, "chromadb", SimpleNamespace(HttpClient=client))
+    monkeypatch.setitem(sys.modules, "chromadb.config", SimpleNamespace(Settings=SimpleNamespace))
     encoder = Mock()
     monkeypatch.setitem(sys.modules, "sentence_transformers", SimpleNamespace(SentenceTransformer=encoder))
     return SimpleNamespace(client=client, encoder=encoder)

@@ -157,7 +157,7 @@ jobs:
               chroma_client_auth_provider="chromadb.auth.token_authn.TokenAuthClientProvider",
               chroma_client_auth_credentials=os.environ["CHROMA_AUTH_TOKEN"],
           )
-          collection = chromadb.HttpClient(host="127.0.0.1", port=8000, settings=settings).get_or_create_collection("ci")
+          collection = chromadb.HttpClient(host="127.0.0.1", port=8000, settings=settings).get_or_create_collection("ci-proxy-check")
           collection.add(ids=["1"], embeddings=[[0.1, 0.2]], documents=["ci"])
           assert collection.count() == 1
           try:
