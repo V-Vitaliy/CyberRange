@@ -1,6 +1,10 @@
+import logging
+
 from fastapi import Request
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class VectorStore:
@@ -11,7 +15,7 @@ class VectorStore:
         self.client = chromadb.HttpClient(host=settings.CHROMA_HOST, port=settings.CHROMA_PORT)
         model_name = "all-mpnet-base-v2"
         device_type = "cpu"
-        print(f"Loading embedding model {model_name} on {device_type}...")
+        logger.info("Loading embedding model %s on %s", model_name, device_type)
         self.encoder = SentenceTransformer(model_name, device=device_type)
 
         self.collection = self.client.get_or_create_collection(
