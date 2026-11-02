@@ -20,6 +20,7 @@ from fastapi.responses import StreamingResponse
 from redis import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.llm_engine import get_llm_instance
 from app.core.queue_manager import LLMQueueManager, get_queue_manager
 from app.core.redis_client import get_redis
@@ -157,6 +158,23 @@ async def upload_document(
     user: dict = Depends(get_current_user_vulnerable),
     redis=Depends(get_redis),
 ):
+    # Read at most one byte past the limit so oversized files are never held in full.
+    content = await file.read(settings.UPLOAD_MAX_BYTES + 1)
+    rejection = None
+    if len(content) > settings.UPLOAD_MAX_BYTES:
+        rejection = (413, f"File exceeds the {settings.UPLOAD_MAX_BYTES} byte limit.")
+    elif not content.startswith(b"%PDF-"):
+        rejection = (415, "Only PDF documents are accepted.")
+    if rejection:
+        await log_security_event(
+            db=db,
+            lab_instance_id=user["lab_instance_id"],
+            event_type="FILE_UPLOAD_REJECTED",
+            payload={"filename": file.filename, "reason": rejection[1]},
+            source_ip=request.client.host,
+        )
+        raise HTTPException(status_code=rejection[0], detail=rejection[1])
+
     task_id = uuid.uuid4()
     redis_key = f"etl_job:{task_id}"
     await redis.hset(
@@ -186,8 +204,6 @@ async def upload_document(
 
     vulnerable_path = os.path.join(base_upload_dir, file.filename)
     validated_path = os.path.realpath(vulnerable_path)
-
-    content = await file.read()
 
     if not any(os.path.commonpath([validated_path, root]) == root for root in (*absallowed, absBase)):
         await log_security_event(

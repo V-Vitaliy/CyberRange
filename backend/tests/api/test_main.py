@@ -176,3 +176,10 @@ async def test_startup_refuses_weak_jwt_secret_before_loading_models(monkeypatch
         async with main.lifespan(main.app):
             pass
     vector_store.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_declared_oversized_body_is_rejected_before_routing(client, monkeypatch):
+    monkeypatch.setattr(main.settings, "UPLOAD_MAX_BYTES", 1)
+    response = await client.post("/api/red/upload", content=b"x" * (main.MULTIPART_OVERHEAD_BYTES + 2))
+    assert response.status_code == 413
