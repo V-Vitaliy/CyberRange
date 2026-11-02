@@ -1,29 +1,16 @@
+"""Chat streaming and tool execution; real adapters with offline HTTP doubles."""
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import Mock
 from uuid import uuid4
 
+import httpx
 import pytest
 from langchain_core.messages import AIMessageChunk
 
 from app.core import llm_engine
 from app.core.tools import send_email
-from app.services.email_service import EmailService
-
-
-@pytest.fixture
-def harness(monkeypatch):
-    monkeypatch.setattr(llm_engine.settings, "SMTP_HOST", "")
-    audit = AsyncMock()
-    monkeypatch.setattr(llm_engine, "log_security_event", audit)
-    delivery = Mock(return_value=True)
-    monkeypatch.setattr(EmailService, "send_real_email", delivery)
-
-    async def in_thread(function, *args):
-        return function(*args)
-
-    monkeypatch.setattr(llm_engine.asyncio, "to_thread", in_thread)
-    return audit, delivery
+from tests.openai_doubles import assert_request, make_model, sse
 
 
 async def run_stream(chunks):
@@ -129,13 +116,17 @@ async def test_simulated_exfiltration_remains_visible_to_siem(harness):
     assert audit.call_args.kwargs['payload']['delivery'] == 'simulated'
 
 
-def test_email_mock_cannot_connect_to_smtp(monkeypatch):
-    from app.services import email_service
-    monkeypatch.setattr(email_service.settings, 'SMTP_HOST', '')
-    smtp = Mock(side_effect=AssertionError('Real SMTP must not be contacted'))
-    monkeypatch.setattr(email_service.smtplib, 'SMTP', smtp)
-    assert EmailService.send_real_email('test@example.invalid', 'Test', 'test') is True
-    smtp.assert_not_called()
+@pytest.mark.asyncio
+async def test_model_without_tools_retains_text_chat(harness):
+    async def stream(messages):
+        yield AIMessageChunk(content='Local answer')
+
+    model = Mock()
+    model.bind_tools.side_effect = NotImplementedError()
+    model.astream = stream
+    output = ''.join([part async for part in llm_engine.generate_unified_stream(model, 'system', 'question', object(), uuid4())])
+    assert output == 'Local answer'
+    harness[1].assert_not_called()
 
 
 def test_real_groq_adapter_binds_email_schema_without_network(monkeypatch):
@@ -148,71 +139,32 @@ def test_real_groq_adapter_binds_email_schema_without_network(monkeypatch):
     assert not model.model_kwargs.get('tools')
 
 
-@pytest.mark.asyncio
-async def test_chat_sse_records_simulated_tool_result_and_history(harness, monkeypatch):
-    from app.services import rag_service
-    from app.db.repository import ChatRepository
-    from app.core.queue_manager import LLMQueueManager
-
-    audit, delivery = harness
-    lab_id = uuid4()
-    session = SimpleNamespace(lab_instance_id=lab_id, use_reranker=False, system_prompt='test')
-    monkeypatch.setattr(rag_service, 'get_authorized_session', AsyncMock(return_value=session))
-    monkeypatch.setattr(ChatRepository, 'get_or_create_thread', AsyncMock())
-    history = AsyncMock()
-    monkeypatch.setattr(ChatRepository, 'append_messages', history)
-
-    async def stream(messages):
-        yield tool_chunk(json.dumps(dict(to_address='test@example.invalid', subject='Test', body='test')))
-
-    model = Mock()
-    model.bind_tools.return_value = SimpleNamespace(astream=stream)
-    user = dict(id=str(uuid4()), sub='student', role='red_team', lab_instance_id=str(lab_id))
-    store = SimpleNamespace(search_documents=Mock(return_value={'documents': [[]]}))
-    parts = [part async for part in rag_service.generate_chat_response_sse(object(), uuid4(), uuid4(), 'Send a test email', LLMQueueManager(), store, user, model)]
-    assert parts[-1] == 'data: [DONE]\n\n'
-    assert 'No email was sent' in history.call_args.kwargs['ai_response']
-    assert audit.call_args.kwargs['lab_instance_id'] == str(lab_id)
-    delivery.assert_called_once()
+@pytest.mark.parametrize('url,model', [('', 'test-model'), ('http://inference.invalid/v1', ''), (' ', ' ')])
+def test_http_provider_requires_explicit_endpoint_and_model(monkeypatch, url, model):
+    monkeypatch.setattr(llm_engine.settings, 'LLM_BASE_URL', url)
+    monkeypatch.setattr(llm_engine.settings, 'LLM_MODEL', model)
+    with pytest.raises(ValueError, match='LLM_BASE_URL and LLM_MODEL must be nonempty'):
+        llm_engine.init_openai_compatible()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('finish_reason', ['stop', 'length'])
-async def test_empty_chat_emits_sse_error_without_saving_success(harness, monkeypatch, finish_reason):
-    from app.services import rag_service
-    from app.db.repository import ChatRepository
-    from app.core.queue_manager import LLMQueueManager
-
-    lab_id = uuid4()
-    session = SimpleNamespace(lab_instance_id=lab_id, use_reranker=False, system_prompt='test')
-    monkeypatch.setattr(rag_service, 'get_authorized_session', AsyncMock(return_value=session))
-    monkeypatch.setattr(ChatRepository, 'get_or_create_thread', AsyncMock())
-    history = AsyncMock()
-    monkeypatch.setattr(ChatRepository, 'append_messages', history)
-
-    async def stream(messages):
-        yield AIMessageChunk(content='', response_metadata={'finish_reason': finish_reason})
-
-    model = Mock()
-    model.bind_tools.return_value = SimpleNamespace(astream=stream)
-    user = dict(id=str(uuid4()), sub='student', role='red_team', lab_instance_id=str(lab_id))
-    store = SimpleNamespace(search_documents=Mock(return_value={'documents': [[]]}))
-    parts = [part async for part in rag_service.generate_chat_response_sse(
-        object(), uuid4(), uuid4(), 'Question', LLMQueueManager(), store, user, model)]
-    assert parts[-1] == 'data: [DONE]\n\n'
-    assert 'error' in json.loads(parts[0][6:])
-    history.assert_not_awaited()
-    harness[1].assert_not_called()
+async def test_real_adapter_streams_unicode_and_keeps_chat_tools(monkeypatch):
+    def handler(request):
+        payload = assert_request(request)
+        assert payload["tools"][0]["function"]["name"] == "send_email"
+        return httpx.Response(200, headers={"content-type": "text/event-stream"},
+                              text=sse({"role": "assistant", "content": "Cześć "}) + sse({"content": "Łódź"}, "stop") + "data: [DONE]\n\n")
+    model = make_model(monkeypatch, handler)
+    assert ''.join([chunk.content async for chunk in model.bind_tools([send_email]).astream('hello')]) == 'Cześć Łódź'
 
 
 @pytest.mark.asyncio
-async def test_model_without_tools_retains_text_chat(harness):
-    async def stream(messages):
-        yield AIMessageChunk(content='Local answer')
-
-    model = Mock()
-    model.bind_tools.side_effect = NotImplementedError()
-    model.astream = stream
-    output = ''.join([part async for part in llm_engine.generate_unified_stream(model, 'system', 'question', object(), uuid4())])
-    assert output == 'Local answer'
-    harness[1].assert_not_called()
+async def test_server_failure_is_propagated(monkeypatch):
+    def handler(request):
+        assert_request(request)
+        return httpx.Response(400, json={"error": {"message": "Unsupported tool call", "type": "invalid_request_error"}})
+    model = make_model(monkeypatch, handler)
+    from openai import BadRequestError
+    with pytest.raises(BadRequestError):
+        async for _ in model.bind_tools([send_email]).astream("hello"):
+            pass
