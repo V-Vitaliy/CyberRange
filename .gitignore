@@ -140,11 +140,9 @@ celerybeat.pid
 /.local-tools/
 /.worktrees/
 /lab_uploads/
-/ISSUE_61_VERIFICATION.md
 # Local agent instructions and working documentation
-/AGENTS.md
+/AGENTS.local.md
 /CLAUDE.md
-/STABILIZATION.md
 /docs/
 .envrc
 .venv
