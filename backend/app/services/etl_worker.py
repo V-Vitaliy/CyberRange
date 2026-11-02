@@ -1,6 +1,9 @@
+import asyncio
 import io
 import logging
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from typing import List
 from uuid import UUID
 
@@ -16,6 +19,13 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 ETL_ERROR_MESSAGE = "Document processing failed."
+
+# Bounded so simultaneous uploads cannot occupy the default pool used by chat and login.
+_etl_executor = ThreadPoolExecutor(max_workers=settings.ETL_MAX_WORKERS, thread_name_prefix="etl")
+
+
+async def _in_etl_thread(function, *args, **kwargs):
+    return await asyncio.get_running_loop().run_in_executor(_etl_executor, partial(function, *args, **kwargs))
 
 
 class ETLWorker:
@@ -80,7 +90,7 @@ class ETLWorker:
         await redis.expire(redis_key, 3600)
 
         try:
-            reader = PdfReader(io.BytesIO(file_content))
+            reader = await _in_etl_thread(PdfReader, io.BytesIO(file_content))
             if len(reader.pages) > settings.PDF_MAX_PAGES:
                 message = f"PDF exceeds the {settings.PDF_MAX_PAGES} page limit"
                 await redis.hset(redis_key, mapping={"status": "Failed", "progress": 100, "message": message})
@@ -91,7 +101,7 @@ class ETLWorker:
             extracted_pages = []
 
             for page_num, page in enumerate(reader.pages):
-                text = page.extract_text()
+                text = await _in_etl_thread(page.extract_text)
                 if text:
                     progress = int(((page_num + 1) / len(reader.pages) * 30))
                     await redis.hset(
@@ -123,7 +133,8 @@ class ETLWorker:
                 )
                 return 0
 
-            chunks = self._chunk_text_with_overlap(full_text)
+            chunks = await _in_etl_thread(self._chunk_text_with_overlap, full_text)
+            token_lengths = await _in_etl_thread(lambda: [self._estimate_tokens(chunk) for chunk in chunks])
             logger.info(f"Generated {len(chunks)} chunks from {filename}.")
 
             metadatas = []
@@ -135,7 +146,7 @@ class ETLWorker:
                         "lab_instance_id": lab_instance_id,
                         "access_level": access_level,
                         "chunk_id": i,
-                        "token_length": self._estimate_tokens(chunk),
+                        "token_length": token_lengths[i],
                     }
                 )
                 ids.append(f"{filename}_{i}_{uuid.uuid4().hex[:8]}")
@@ -151,7 +162,9 @@ class ETLWorker:
                     batch_meta = metadatas[i : i + self.batch_size]
                     batch_ids = ids[i : i + self.batch_size]
 
-                    self.vector_store.add_documents(documents=batch_chunks, metadatas=batch_meta, ids=batch_ids)
+                    await _in_etl_thread(
+                        self.vector_store.add_documents, documents=batch_chunks, metadatas=batch_meta, ids=batch_ids
+                    )
                     total_inserted += len(batch_chunks)
                     logger.info(f"Inserted batch: {total_inserted}/{len(chunks)} chunks.")
                     progress = 60 + int((total_inserted + 1) / len(chunks) * 30)

@@ -1,3 +1,4 @@
+import asyncio
 from datetime import timedelta
 from typing import List
 
@@ -29,7 +30,7 @@ async def login_blue_team(login_data: LoginRequest, db: AsyncSession = Depends(g
     """Authenticates a Blue Team user and returns a signed JWT."""
     user = await UserRepository.get_by_username(db, login_data.username)
 
-    if not user or not verify_password(login_data.password, user.password_hash):
+    if not user or not await asyncio.to_thread(verify_password, login_data.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Incorrect username or password")
 
     if user.role not in ["blue_team", "admin"]:

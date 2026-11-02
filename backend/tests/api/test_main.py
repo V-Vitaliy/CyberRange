@@ -198,3 +198,39 @@ async def test_cors_allows_only_configured_frontend_origins(client, origin, allo
     simple = await client.get("/api/health", headers={"Origin": origin})
     for response in (preflight, simple):
         assert response.headers.get("access-control-allow-origin") == (origin if allowed else None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("side", ["red", "blue"])
+async def test_login_password_check_runs_off_the_event_loop(monkeypatch, side):
+    import threading
+
+    from app.api import routes_blue, routes_red
+
+    user = SimpleNamespace(
+        id=uuid4(), username="test-user", role=side + "_team", lab_instance_id=uuid4(), password_hash="hash"
+    )
+    monkeypatch.setattr(UserRepository, "get_by_username", AsyncMock(return_value=user))
+    threads = []
+
+    def verify(plain, hashed):
+        threads.append(threading.get_ident())
+        return True
+
+    monkeypatch.setattr(routes_red if side == "red" else routes_blue, "verify_password", verify)
+    monkeypatch.setattr(routes_red, "log_security_event", AsyncMock())
+    sub_app = red_app if side == "red" else blue_app
+
+    async def database():
+        yield object()
+
+    previous = dict(sub_app.dependency_overrides)
+    sub_app.dependency_overrides[get_db] = database
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(f"/api/{side}/login", json={"username": "test-user", "password": "x"})
+    finally:
+        sub_app.dependency_overrides.clear()
+        sub_app.dependency_overrides.update(previous)
+    assert response.status_code == 200
+    assert threads and threads[0] != threading.get_ident()
