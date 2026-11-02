@@ -5,6 +5,11 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Explicit bash enables pipefail, so a failing command piped into tee fails the step.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   backend:
     runs-on: ubuntu-latest
@@ -72,6 +77,15 @@ jobs:
         # Fail instead of passing silently if the check skips itself.
         run: |
           python backend/tests/integration/test_sqli_isolation_postgres.py -v 2>&1 | tee result.txt
+          ! grep -qi skipped result.txt
+
+      - name: PostgreSQL SOC worker check
+        env:
+          CYBERRANGE_SOC_TEST_DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+          CYBERRANGE_SOC_TEST_DATABASE_NAME: cyberrange_test
+        # Fail instead of passing silently if the check skips itself.
+        run: |
+          python backend/tests/integration/test_soc_worker_postgres.py -v 2>&1 | tee result.txt
           ! grep -qi skipped result.txt
 
   compose-isolation:
