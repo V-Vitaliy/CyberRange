@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     # HTTP models may spend part of this budget on reasoning before answering.
     LLM_MAX_TOKENS: int = Field(default=2048, gt=0)
 
+    # Input limits against resource exhaustion.
+    UPLOAD_MAX_BYTES: int = Field(default=10 * 1024 * 1024, gt=0)
+    PDF_MAX_PAGES: int = Field(default=200, gt=0)
+    PROMPT_MAX_CHARS: int = Field(default=4000, gt=0)
+
     # LLM Hardware Optimizations (Defaults based on g4dn.xlarge / RTX 3060)
     LLM_MODEL_PATH: str = "../../models/Meta-Llama-3-8B.Q4_K_M.gguf"
 

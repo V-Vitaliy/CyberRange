@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 
+from app.core.config import settings
 from app.services import etl_worker
 
 
@@ -25,3 +26,15 @@ async def test_etl_marks_every_chunk_with_lab_id(monkeypatch):
     metadata = worker.vector_store.add_documents.call_args.kwargs["metadatas"]
     assert all(item["lab_instance_id"] == str(lab_id) for item in metadata)
     assert all(item["access_level"] == "public" for item in metadata)
+
+
+@pytest.mark.asyncio
+async def test_etl_rejects_pdf_over_page_limit(monkeypatch):
+    worker = etl_worker.ETLWorker.__new__(etl_worker.ETLWorker)
+    worker.vector_store = Mock()
+    pages = [SimpleNamespace(extract_text=lambda: "page")] * (settings.PDF_MAX_PAGES + 1)
+    monkeypatch.setattr(etl_worker, "PdfReader", Mock(return_value=SimpleNamespace(pages=pages)))
+    redis = AsyncMock()
+    assert await worker.process_pdf(b"stub", "large.pdf", uuid4(), redis, uuid4()) == 0
+    assert redis.hset.call_args.kwargs["mapping"]["status"] == "Failed"
+    worker.vector_store.add_documents.assert_not_called()
