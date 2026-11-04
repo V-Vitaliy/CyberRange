@@ -100,9 +100,13 @@ jobs:
             echo "POSTGRES_DB=cyberrange"
             echo "REDIS_PASSWORD=$(openssl rand -hex 24)"
             echo "CHROMA_AUTH_TOKEN=$(openssl rand -hex 32)"
+            echo "S3_ACCESS_KEY=$(openssl rand -hex 16)"
+            echo "S3_SECRET_KEY=$(openssl rand -hex 32)"
           } > .env
           docker compose -f docker-compose.state.yml up -d --wait
           docker compose -f docker-compose.compute.yml up -d
+          # The bucket init job must finish successfully.
+          test "$(docker wait cyberrange_seaweedfs_init)" = 0 || { docker logs cyberrange_seaweedfs_init; exit 1; }
       - name: Services require credentials and listen on loopback only
         run: |
           set -a; . ./.env; set +a
@@ -118,8 +122,11 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer wrong' \
             http://127.0.0.1:8000/api/v2/heartbeat)" = 403
           test -z "$(docker port cyberrange_chroma)"
+          # SeaweedFS publishes only the S3 gateway; anonymous S3 requests are denied.
+          test "$(docker port cyberrange_seaweedfs)" = "8333/tcp -> 127.0.0.1:8333"
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8333/lab-uploads)" = 403
           # Published ports are bound to 127.0.0.1, so the host's external address is refused.
-          for port in 5432 6379 8000 1025 8025; do
+          for port in 5432 6379 8000 8333 1025 8025; do
             docker ps --format '{{.Ports}}' | grep -q "127.0.0.1:$port->"
             if timeout 3 bash -c "echo > /dev/tcp/$external/$port" 2>/dev/null; then
               echo "Port $port is reachable on $external"; exit 1
@@ -167,11 +174,49 @@ jobs:
           else:
               raise AssertionError("Chroma accepted a client without a token")
           PY
+      - name: Backend object store is limited to its bucket
+        env:
+          PYTHONPATH: backend
+        run: |
+          python -m pip install -q boto3 fastapi
+          set -a; . ./.env; set +a
+          python - <<'PY'
+          import asyncio
+          import boto3
+          from botocore import UNSIGNED
+          from botocore.config import Config
+          from app.db.object_store import ObjectStore, resolve_upload_target
+
+          store = ObjectStore.from_settings()
+          key = resolve_upload_target("00000000-0000-0000-0000-000000000001", "../student_uploads/ci.pdf").key
+          asyncio.run(store.put(key, b"%PDF-ci"))
+          assert asyncio.run(store.get(key)) == b"%PDF-ci"
+
+          def denied(call):
+              try:
+                  call()
+              except Exception:
+                  return True
+              return False
+
+          assert denied(lambda: store.client.create_bucket(Bucket="ci-other-bucket")), "backend created a bucket"
+          anonymous = boto3.client(
+              "s3", endpoint_url="http://127.0.0.1:8333", region_name="us-east-1",
+              config=Config(signature_version=UNSIGNED),
+          )
+          assert denied(lambda: anonymous.get_object(Bucket=store.bucket, Key=key)), "anonymous read allowed"
+          wrong = boto3.client(
+              "s3", endpoint_url="http://127.0.0.1:8333", region_name="us-east-1",
+              aws_access_key_id="wrongkey0000000000", aws_secret_access_key="wrong",
+          )
+          assert denied(lambda: wrong.get_object(Bucket=store.bucket, Key=key)), "wrong key allowed"
+          PY
       - name: Compose refuses to start without credentials
         run: |
           rm .env
           ! docker compose -f docker-compose.state.yml config 2>/dev/null
           ! docker compose -f docker-compose.compute.yml config 2>/dev/null
+          ! CHROMA_AUTH_TOKEN=set docker compose -f docker-compose.compute.yml config 2>/dev/null
 
   frontend:
     runs-on: ubuntu-latest

@@ -13,6 +13,7 @@ from app.api.routes_red import router as red_router
 from app.core.config import require_strong_jwt_secret, settings
 from app.core.queue_manager import LLMQueueManager
 from app.db.chroma_client import VectorStore
+from app.db.object_store import ObjectStore
 from app.llm.provider import create_llm
 from app.services.soc_worker import run_soc_analyst_loop
 
@@ -39,6 +40,7 @@ async def lifespan(app: FastAPI):
     require_strong_jwt_secret(settings.JWT_SECRET)
     queue_manager = LLMQueueManager()
     vector_store = VectorStore()
+    object_store = ObjectStore.from_settings()
 
     llm_instance = create_llm()
 
@@ -49,6 +51,7 @@ async def lifespan(app: FastAPI):
     red_app.state.llm = llm_instance
     red_app.state.queue_manager = queue_manager
     red_app.state.vector_store = vector_store
+    red_app.state.object_store = object_store
 
     blue_app.state.llm = llm_instance
     blue_app.state.queue_manager = queue_manager

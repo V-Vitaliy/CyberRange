@@ -1,6 +1,5 @@
 """Red Team routes with mocked storage; not evidence of PostgreSQL isolation."""
 
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
@@ -13,6 +12,7 @@ from app.core.redis_client import get_redis
 from app.core.security import get_current_user_vulnerable
 from app.db.chroma_client import get_vector_store
 from app.db.database import get_db
+from app.db.object_store import get_object_store
 from app.db.repository import ChatRepository, GameSessionRepository
 from app.db.sqli_isolation import IsolationError
 from app.db.sqli_search import HistoryQueryError
@@ -208,27 +208,11 @@ def upload(monkeypatch, tmp_path):
         redis=AsyncMock(),
         process_pdf=AsyncMock(),
         log=AsyncMock(),
+        store=SimpleNamespace(put=AsyncMock()),
         root=tmp_path,
     )
     monkeypatch.setattr(routes_red, "log_security_event", env.log)
-    monkeypatch.setattr(routes_red, "ETLWorker", Mock(return_value=SimpleNamespace(process_pdf=env.process_pdf)))
-
-    class File:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            pass
-
-        async def write(self, data):
-            self.path.write_bytes(data)
-
-    def open_file(path, mode):
-        result = File()
-        result.path = Path(path)
-        return result
-
-    monkeypatch.setattr(routes_red.aiofiles, "open", open_file)
+    monkeypatch.setattr(routes_red, "ETLWorker", Mock(return_value=SimpleNamespace(process_stored_pdf=env.process_pdf)))
 
     async def current_user():
         return env.user
@@ -242,6 +226,9 @@ def upload(monkeypatch, tmp_path):
     async def vector_store():
         return Mock()
 
+    async def object_store():
+        return env.store
+
     async def post(filename, content=PDF_BYTES):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             return await client.post("/api/red/upload", files={"file": (filename, content, "application/pdf")})
@@ -253,6 +240,7 @@ def upload(monkeypatch, tmp_path):
             get_db: database,
             get_redis: redis_dependency,
             get_vector_store: vector_store,
+            get_object_store: object_store,
         }
     )
     try:
@@ -263,22 +251,33 @@ def upload(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "filename,expected,indexed",
+    "filename,expected,path,indexed",
     [
-        ("normal.pdf", 200, False),
-        ("../student_uploads/poison.pdf", 200, True),
-        ("../../outside.pdf", 403, False),
-        ("../student_uploads-other/outside.pdf", 403, False),
+        ("normal.pdf", 200, "uploads/normal.pdf", False),
+        ("../student_uploads/poison.pdf", 200, "student_uploads/poison.pdf", True),
+        ("../../outside.pdf", 403, None, False),
+        ("../student_uploads-other/outside.pdf", 403, None, False),
     ],
 )
-async def test_upload_keeps_traversal_exercise_inside_own_lab(upload, filename, expected, indexed):
-    user, redis, process_pdf, tmp_path = upload.user, upload.redis, upload.process_pdf, upload.root
+async def test_upload_keeps_traversal_exercise_inside_own_lab(upload, filename, expected, path, indexed):
+    user, redis, process_pdf = upload.user, upload.redis, upload.process_pdf
     response = await upload.post(filename)
     assert response.status_code == expected
-    assert not (tmp_path / "lab_uploads" / "outside.pdf").exists()
+    # Nothing is written to the API host's disk.
+    assert list(upload.root.iterdir()) == []
+    key = f"{user['lab_instance_id']}/{path}"
+    if path:
+        upload.store.put.assert_awaited_once_with(key, PDF_BYTES)
+        stored = next(c.kwargs for c in upload.log.await_args_list if c.kwargs["event_type"] == "FILE_UPLOAD")
+        assert stored["payload"]["destination"] == key
+    else:
+        upload.store.put.assert_not_awaited()
+        assert upload.log.call_args.kwargs["event_type"] == "FILE_UPLOAD_FAILED"
     if indexed:
         process_pdf.assert_awaited_once()
-        assert str(process_pdf.call_args.args[4]) == user["lab_instance_id"]
+        assert process_pdf.call_args.args[0] is upload.store
+        assert process_pdf.call_args.args[1] == key
+        assert str(process_pdf.call_args.args[5]) == user["lab_instance_id"]
     else:
         process_pdf.assert_not_called()
     if expected == 200:
@@ -296,7 +295,8 @@ async def test_upload_rejects_oversized_or_non_pdf_before_storing(upload, monkey
     monkeypatch.setattr(routes_red.settings, "UPLOAD_MAX_BYTES", 32)
     response = await upload.post("../student_uploads/poison.pdf", content)
     assert response.status_code == status
-    assert not (upload.root / "lab_uploads").exists()
+    upload.store.put.assert_not_awaited()
+    assert list(upload.root.iterdir()) == []
     upload.redis.hset.assert_not_awaited()
     upload.process_pdf.assert_not_called()
     assert upload.log.call_args.kwargs["event_type"] == "FILE_UPLOAD_REJECTED"
