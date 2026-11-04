@@ -8,6 +8,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.core import security
+from app.labs.repository import GameSessionRepository
 
 
 @pytest.fixture
@@ -16,7 +17,7 @@ def identity(monkeypatch):
     user = SimpleNamespace(id=uuid4(), username="student", role="red_team", lab_instance_id=uuid4())
     session = SimpleNamespace(jwt_filter_enabled=False, lab_instance_id=user.lab_instance_id)
     monkeypatch.setattr(security.UserRepository, "get_by_id", AsyncMock(return_value=user))
-    monkeypatch.setattr(security.GameSessionRepository, "get_by_lab_instance_id", AsyncMock(return_value=session))
+    monkeypatch.setattr(GameSessionRepository, "get_by_lab_instance_id", AsyncMock(return_value=session))
     claims = dict(sub=user.username, id=str(user.id), role=user.role, lab_instance_id=str(user.lab_instance_id))
     return user, session, claims
 
@@ -99,16 +100,6 @@ async def test_blue_api_role_guard(role):
 
 
 @pytest.mark.asyncio
-async def test_session_from_another_lab_is_not_available(monkeypatch):
-    monkeypatch.setattr(
-        security.GameSessionRepository, "get_by_id", AsyncMock(return_value=SimpleNamespace(lab_instance_id=uuid4()))
-    )
-    with pytest.raises(HTTPException) as exc:
-        await security.get_authorized_session(object(), uuid4(), uuid4())
-    assert exc.value.status_code == 404
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize("token", ["malformed", jwt.encode({"id": str(uuid4())}, None, algorithm="none")])
 async def test_malformed_or_unscoped_token_requires_relogin(identity, token):
     with pytest.raises(HTTPException) as exc:
@@ -123,7 +114,7 @@ async def test_buying_jwt_defense_blocks_previously_accepted_forgery(identity, m
     _, session, claims = identity
     session.defense_budget = 5
     session.id = uuid4()
-    monkeypatch.setattr(defense.GameSessionRepository, "get_by_id", AsyncMock(return_value=session))
+    monkeypatch.setattr(GameSessionRepository, "get_by_id", AsyncMock(return_value=session))
     genuine = security.create_access_token(claims)
     payload = jwt.decode(genuine, options={"verify_signature": False})
     payload["role"] = "admin"

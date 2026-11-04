@@ -14,7 +14,8 @@ from app.agents.soc_agent import AnalysisOutput
 from app.api import routes_ctf
 from app.core.security import create_access_token
 from app.db.database import get_db
-from app.db.repository import CtfRepository, GameSessionRepository, UserRepository
+from app.db.repository import CtfRepository, UserRepository
+from app.labs.repository import GameSessionRepository
 from app.main import app, blue_app, red_app
 
 

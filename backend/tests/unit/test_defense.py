@@ -6,6 +6,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.db.models import GameSession
+from app.labs.repository import GameSessionRepository
 from app.services import defense
 
 
@@ -28,7 +29,7 @@ async def test_purchase_activates_once_and_charges_correct_price(monkeypatch, ki
         rate_limit_enabled=False,
         use_reranker=False,
     )
-    monkeypatch.setattr(defense.GameSessionRepository, "get_by_id", AsyncMock(return_value=session))
+    monkeypatch.setattr(GameSessionRepository, "get_by_id", AsyncMock(return_value=session))
     db = SimpleNamespace(commit=AsyncMock())
     await defense.process_defense_purchase(db, session.id, kind)
     assert session.defense_budget == 5 - defense.DEFENSE_PRICING[kind]

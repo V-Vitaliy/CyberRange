@@ -3,7 +3,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user_vulnerable, hash_ctf_flag
 from app.db.database import get_db
-from app.db.repository import CtfRepository, GameSessionRepository
+from app.db.repository import CtfRepository
+from app.labs.service import get_session_for_lab
 from app.schemas.ctf_schemas import CtfSubmitRequest
 from app.services.siem_logger import log_security_event
 
@@ -24,7 +25,7 @@ async def submit_flag(
     if not user_id or not lab_instance_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload.")
 
-    game_session = await GameSessionRepository.get_by_lab_instance_id(db, lab_instance_id)
+    game_session = await get_session_for_lab(db, lab_instance_id)
 
     if not game_session:
         raise HTTPException(status_code=404, detail="Game session not found for this lab instance.")

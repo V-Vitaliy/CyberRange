@@ -13,9 +13,10 @@ from app.core.security import get_current_user_vulnerable
 from app.db.chroma_client import get_vector_store
 from app.db.database import get_db
 from app.db.object_store import get_object_store
-from app.db.repository import ChatRepository, GameSessionRepository
+from app.db.repository import ChatRepository
 from app.db.sqli_isolation import IsolationError
 from app.db.sqli_search import HistoryQueryError
+from app.labs.repository import GameSessionRepository
 from app.llm import provider
 from app.main import app, red_app
 

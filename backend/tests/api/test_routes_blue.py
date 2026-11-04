@@ -5,10 +5,9 @@ from uuid import uuid4
 import httpx
 import pytest
 
-from app.api import routes_blue
 from app.core.security import get_blue_team_user, get_current_user_secure
 from app.db.database import get_db
-from app.db.repository import GameSessionRepository
+from app.labs.repository import GameSessionRepository
 from app.main import app, blue_app
 
 
@@ -72,7 +71,7 @@ async def test_profile_resolves_authenticated_lab_session(monkeypatch, has_sessi
     user = SimpleNamespace(username="blue", role="blue_team", lab_instance_id=uuid4())
     session_id = uuid4()
     lookup = AsyncMock(return_value=SimpleNamespace(id=session_id) if has_session else None)
-    monkeypatch.setattr(routes_blue.GameSessionRepository, "get_by_lab_instance_id", lookup)
+    monkeypatch.setattr(GameSessionRepository, "get_by_lab_instance_id", lookup)
     db = object()
 
     async def current_user():
