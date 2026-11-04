@@ -6,6 +6,13 @@ for inspecting audit events, investigating incidents and purchasing defenses.
 Intentional SQL injection, JWT role manipulation and document-upload behavior
 are part of the exercises and must remain within the assigned laboratory.
 
+Documentation:
+[architecture](docs/architecture.md) ·
+[exercises](docs/exercises.md) ·
+[local setup](LOCAL_RUN.md) ·
+[contributing](CONTRIBUTING.md) ·
+[review instructions](docs/review_instructions.md)
+
 ## Current state — October 2026
 
 **The core local workflow is operational with an OpenAI-compatible Qwen server.**
