@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.repository import GameSessionRepository
+from app.labs.service import get_session
 from app.schemas.blue_team import BuyDefenseResponse
 
 # Pricing catalog for defense mechanisms (according to specification)
@@ -27,7 +27,7 @@ async def process_defense_purchase(db: AsyncSession, session_id: UUID, defense_t
     price = DEFENSE_PRICING[defense_type]
 
     # 2. Fetch the game session
-    game_session = await GameSessionRepository.get_by_id(db, session_id, for_update=True)
+    game_session = await get_session(db, session_id, for_update=True)
 
     if not game_session:
         raise HTTPException(status_code=404, detail="Game session not found.")

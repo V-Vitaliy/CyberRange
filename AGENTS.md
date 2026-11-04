@@ -37,9 +37,14 @@ Follow `CONTRIBUTING.md`:
 
 ## Project map
 - `backend/app/`: FastAPI application.
-  - `api/` routes, `core/` configuration, security and LLM engine,
-    `services/` business logic, `db/` models and repositories,
-    `agents/` LangGraph agents, `schemas/` request/response models.
+  - Domain packages `app/<domain>/` (`router.py`, `service.py`, `repository.py`,
+    `schemas.py` as needed). Migrated so far: `labs/` (game sessions). Other
+    domains use a domain's `service`, never its `repository`;
+    `tests/unit/test_architecture.py` enforces this.
+  - Not yet migrated (ARC-3): `api/` routes, `services/` business logic,
+    `db/repository.py`. Shared: `core/` configuration, security and LLM engine,
+    `db/` models and database, `llm/` model factory, `agents/` LangGraph agents
+    and tools, `schemas/` request/response models.
 - `backend/tests/`: backend tests (see below).
 - `frontend/src/`: Next.js UI; `frontend/tests/`: Node tests.
 - `scripts/`: database setup and SQLi provisioning CLIs.

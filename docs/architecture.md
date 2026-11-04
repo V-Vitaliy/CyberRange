@@ -41,8 +41,8 @@ uploaded objects all carry the lab ID.
 - The server enforces the boundary; it never relies on client input:
   - identity and lab come from the **signed** `lab_scope` claim, not from
     forgeable token fields;
-  - every session lookup goes through `get_authorized_session` (session must
-    belong to the caller's lab);
+  - every session lookup goes through `labs.service.get_authorized_session`
+    (session must belong to the caller's lab);
   - Chroma queries always filter by `lab_instance_id`;
   - object keys always start with the caller's lab ID;
   - the SQLi exercise runs as a per-lab, read-only PostgreSQL role that sees only
@@ -104,11 +104,15 @@ uploaded objects all carry the lab ID.
 | `agents/` | `soc_agent.py` (LangGraph SOC analyst), `tools/` (tool registry: schema, risk level, audited handler; `send_email`) |
 | `services/` | `rag_service.py`, `etl_worker.py`, `soc_worker.py`, `forensics.py`, `defense.py`, `rate_limiter.py`, `email_service.py`, `siem_logger.py` |
 | `db/` | `models.py`, `repository.py`, `database.py`, `chroma_client.py`, `object_store.py`, `sqli_isolation.py`, `sqli_search.py` |
+| `labs/` | Game sessions: `repository.py` (`GameSessionRepository`), `service.py` (`get_session`, `get_session_for_lab`, `get_authorized_session`) |
 | `schemas/` | Pydantic request/response models |
 
 Dependencies point inward: routers → services → repositories. `core/` must not
-import domain repositories. Domain modules (router, service, repository and
-schemas per domain) are being introduced step by step (ARC-3).
+import domain repositories. Domain packages (`app/<domain>/` with router,
+service, repository and schemas as needed) are introduced step by step (ARC-3):
+`labs` is migrated; `auth`, `ctf`, `defense`, `siem`, `chat` and `documents`
+follow. Other code uses a domain's `service`, never its `repository`; this is
+enforced by `backend/tests/unit/test_architecture.py`.
 
 ## Configuration and secrets
 

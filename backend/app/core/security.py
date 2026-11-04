@@ -10,7 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.db.database import get_db
 from app.db.models import User
-from app.db.repository import GameSessionRepository, UserRepository, ensure_uuid
+from app.db.repository import UserRepository, ensure_uuid
+from app.labs.service import get_session_for_lab
 
 
 # ---------------------------------------------------------
@@ -123,17 +124,6 @@ async def get_blue_team_user(user: User = Depends(get_current_user_secure)) -> U
     return user
 
 
-async def get_authorized_session(db, session_id, lab_instance_id):
-    try:
-        session = await GameSessionRepository.get_by_id(db, session_id)
-        lab_id = ensure_uuid(lab_instance_id)
-    except (ValueError, TypeError, AttributeError):
-        raise HTTPException(status_code=422, detail="Invalid session or lab ID")
-    if session is None or session.lab_instance_id != lab_id:
-        raise HTTPException(status_code=404, detail="Game session not found")
-    return session
-
-
 async def get_current_user_vulnerable(
     authorization: str | None = Depends(get_bearer_authorization),
     db: AsyncSession = Depends(get_db),
@@ -162,7 +152,7 @@ async def get_current_user_vulnerable(
         for key in ("sub", "id", "lab_instance_id"):
             if payload.get(key) != scope[key]:
                 raise ValueError("Token identity does not match its lab scope")
-        session = await GameSessionRepository.get_by_lab_instance_id(db, user.lab_instance_id)
+        session = await get_session_for_lab(db, user.lab_instance_id)
         if session is None:
             raise ValueError("Game session not found")
         if session.jwt_filter_enabled:
