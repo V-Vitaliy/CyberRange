@@ -5,6 +5,7 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
+from app.labs.repository import GameSessionRepository
 from app.services import rate_limiter
 
 
@@ -12,7 +13,7 @@ from app.services import rate_limiter
 @pytest.mark.parametrize("enabled", [False, True])
 async def test_rate_limit_only_blocks_when_purchased(monkeypatch, enabled):
     session = SimpleNamespace(rate_limit_enabled=enabled, rate_limit_rpm=2, lab_instance_id=uuid4())
-    monkeypatch.setattr(rate_limiter.GameSessionRepository, "get_by_id", AsyncMock(return_value=session))
+    monkeypatch.setattr(GameSessionRepository, "get_by_id", AsyncMock(return_value=session))
     audit = AsyncMock()
     monkeypatch.setattr(rate_limiter, "log_security_event", audit)
     redis = AsyncMock()
@@ -35,7 +36,7 @@ async def test_rate_limit_only_blocks_when_purchased(monkeypatch, enabled):
 @pytest.mark.asyncio
 async def test_rate_limit_block_is_logged_not_printed(monkeypatch, capsys, caplog):
     session = SimpleNamespace(rate_limit_enabled=True, rate_limit_rpm=1, lab_instance_id=uuid4())
-    monkeypatch.setattr(rate_limiter.GameSessionRepository, "get_by_id", AsyncMock(return_value=session))
+    monkeypatch.setattr(GameSessionRepository, "get_by_id", AsyncMock(return_value=session))
     monkeypatch.setattr(rate_limiter, "log_security_event", AsyncMock())
     redis = AsyncMock()
     redis.incr.return_value = 2

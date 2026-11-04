@@ -5,10 +5,11 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import create_access_token, get_authorized_session, get_blue_team_user, verify_password
+from app.core.security import create_access_token, get_blue_team_user, verify_password
 from app.db.database import get_db
 from app.db.models import User
-from app.db.repository import AuditLogRepository, GameSessionRepository, UserRepository
+from app.db.repository import AuditLogRepository, UserRepository
+from app.labs.service import get_authorized_session, get_session_for_lab
 from app.schemas.blue_team import (
     AuditLogEntry,
     BuyDefenseRequest,
@@ -54,7 +55,7 @@ async def get_my_profile(
     db: AsyncSession = Depends(get_db),
 ):
     """Return the authenticated profile and its laboratory's current session."""
-    session = await GameSessionRepository.get_by_lab_instance_id(db, current_user.lab_instance_id)
+    session = await get_session_for_lab(db, current_user.lab_instance_id)
     return {
         "username": current_user.username,
         "role": current_user.role,
