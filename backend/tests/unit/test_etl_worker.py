@@ -126,3 +126,28 @@ async def test_concurrent_uploads_share_a_bounded_etl_pool(monkeypatch):
     jobs = [make_worker().process_pdf(b"stub", f"{n}.pdf", uuid4(), AsyncMock(), uuid4()) for n in range(6)]
     assert await asyncio.gather(*jobs) == [1] * 6
     assert peak == settings.ETL_MAX_WORKERS
+
+
+@pytest.mark.asyncio
+async def test_stored_pdf_is_read_from_object_storage(monkeypatch):
+    worker = etl_worker.ETLWorker.__new__(etl_worker.ETLWorker)
+    worker.process_pdf = AsyncMock(return_value=3)
+    store = SimpleNamespace(get=AsyncMock(return_value=b"%PDF-stored"))
+    task_id, redis, lab_id = uuid4(), AsyncMock(), uuid4()
+    key = f"{lab_id}/student_uploads/doc.pdf"
+    assert await worker.process_stored_pdf(store, key, "doc.pdf", task_id, redis, lab_id) == 3
+    store.get.assert_awaited_once_with(key)
+    worker.process_pdf.assert_awaited_once_with(b"%PDF-stored", "doc.pdf", task_id, redis, lab_id)
+
+
+@pytest.mark.asyncio
+async def test_stored_pdf_read_failure_reports_generic_status(caplog):
+    worker = etl_worker.ETLWorker.__new__(etl_worker.ETLWorker)
+    worker.process_pdf = AsyncMock()
+    store = SimpleNamespace(get=AsyncMock(side_effect=RuntimeError("NoSuchKey at seaweedfs:8333")))
+    redis = AsyncMock()
+    assert await worker.process_stored_pdf(store, "lab/student_uploads/x.pdf", "x.pdf", uuid4(), redis, uuid4()) == 0
+    status = redis.hset.call_args.kwargs["mapping"]
+    assert (status["status"], status["message"]) == ("Failed", etl_worker.ETL_ERROR_MESSAGE)
+    worker.process_pdf.assert_not_called()
+    assert any(record.exc_info for record in caplog.records)

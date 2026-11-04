@@ -38,6 +38,7 @@ two-server deployment.
 | PostgreSQL | `localhost:5432` |
 | Redis | `localhost:6379` |
 | Chroma (Envoy token proxy, needs `CHROMA_AUTH_TOKEN`) | `localhost:8000` |
+| Lab uploads (SeaweedFS S3 gateway, needs `S3_*` keys) | `localhost:8333` |
 | Backend | `http://127.0.0.1:8001` |
 | Red Team Swagger | `http://127.0.0.1:8001/api/red/docs` |
 | Blue Team Swagger | `http://127.0.0.1:8001/api/blue/docs` |
@@ -84,7 +85,7 @@ not included in a fresh clone.
 - **Inference:** streamed chat and a shared model queue; Auto-SOC uses a LangGraph
   workflow with the selected model. Manual investigation scoring currently uses
   regex heuristics, not a trained ML classifier.
-- **Storage:** uploaded PDFs are local files under `lab_uploads/`.
+- **Storage:** uploaded PDFs are objects in S3-compatible storage (SeaweedFS), under a per-lab key prefix.
 
 ## Tests and confidence
 

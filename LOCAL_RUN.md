@@ -26,6 +26,7 @@ If `.env` does not exist yet, copy `.env.example` to `.env`. Do not overwrite yo
 - `JWT_SECRET`: required, generate with `openssl rand -hex 32`. The API refuses to start with an empty value, a value shorter than 32 bytes, or a published example value: a known secret lets lab users forge Blue Team tokens and other labs' scopes.
 - `DATABASE_URL`, `REDIS_URL`: local connections consistent with your database setup.
 - `CHROMA_HOST=localhost`, `CHROMA_PORT=8000`, `CHROMA_AUTH_TOKEN` (generate with `openssl rand -hex 32`).
+- `S3_ENDPOINT_URL=http://localhost:8333`, `S3_BUCKET=lab-uploads`, `S3_ACCESS_KEY` (`openssl rand -hex 16`) and `S3_SECRET_KEY` (`openssl rand -hex 32`).
 - `SMTP_HOST=`: leave empty for the first run. The email tool will simulate delivery and explicitly report that no email was sent. To see real messages, start the Mailpit sink (`docker compose -f docker-compose.compute.yml up -d mailpit`), set `SMTP_HOST=localhost`, `SMTP_PORT=1025`, `SMTP_STARTTLS=false`, and open http://localhost:8025. With any SMTP server, the agent can only email domains in `EMAIL_ALLOWED_DOMAINS` (default `lab.local`); other recipients are blocked and logged as `AI_EMAIL_BLOCKED`, or `AI_DATA_EXFILTRATION` when the message contains a flag.
 
 For an OpenAI-compatible inference server, configure these values in your local
@@ -93,11 +94,11 @@ Existing Compose files:
 
 ```bash
 docker compose -f docker-compose.state.yml up -d
-docker compose -f docker-compose.compute.yml up -d chroma-proxy
+docker compose -f docker-compose.compute.yml up -d chroma-proxy seaweedfs seaweedfs-init
 python -m nltk.downloader punkt_tab
 ```
 
-Ports: PostgreSQL 5432, Redis 6379, Chroma token proxy 8000, API 8001, frontend 3000. Uploaded PDFs are stored locally.
+Ports: PostgreSQL 5432, Redis 6379, Chroma token proxy 8000, S3 gateway 8333, API 8001, frontend 3000.
 
 PostgreSQL, Redis and Chroma are published only on `127.0.0.1` by default
 (`STATE_BIND_ADDRESS`, `COMPUTE_BIND_ADDRESS`). Lab users must reach only the API
@@ -108,6 +109,14 @@ the Chroma container publishes no port: an Envoy proxy (`chroma-proxy`,
 `deploy/envoy-chroma.yaml`) is the only entry point and rejects requests without
 `Authorization: Bearer <CHROMA_AUTH_TOKEN>` with 403. The backend refuses to start
 without the token. The proxy also caps every Chroma call at 60 seconds.
+
+Lab uploads are stored in SeaweedFS (`seaweedfs`, `deploy/seaweedfs-s3.json`)
+under `<lab_instance_id>/uploads/` and `<lab_instance_id>/student_uploads/` in the
+`S3_BUCKET` bucket; only `student_uploads/` is indexed. Only the S3 gateway (8333)
+is published. Its single identity uses `S3_ACCESS_KEY`/`S3_SECRET_KEY` and may only
+read, write and list that bucket; anonymous requests are denied. The one-shot
+`seaweedfs-init` service creates the bucket. The backend refuses to start without
+the keys or the bucket. The old local `lab_uploads/` folder is no longer used.
 
 Input limits (optional `.env` overrides): `UPLOAD_MAX_BYTES` (10 MiB, PDF files
 only), `PDF_MAX_PAGES` (200) and `PROMPT_MAX_CHARS` (4000). Requests that declare
