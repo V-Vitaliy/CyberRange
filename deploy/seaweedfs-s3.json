@@ -1,0 +1,9 @@
+{
+  "identities": [
+    {
+      "name": "cyberrange-backend",
+      "credentials": [{ "accessKey": "__S3_ACCESS_KEY__", "secretKey": "__S3_SECRET_KEY__" }],
+      "actions": ["Read:__S3_BUCKET__", "Write:__S3_BUCKET__", "List:__S3_BUCKET__"]
+    }
+  ]
+}

@@ -65,6 +65,12 @@ class Settings(BaseSettings):
     # Bearer token checked by the Envoy proxy in front of Chroma.
     CHROMA_AUTH_TOKEN: str = ""
 
+    # S3-compatible object storage for lab uploads (SeaweedFS in Compose).
+    S3_ENDPOINT_URL: str = "http://localhost:8333"
+    S3_BUCKET: str = "lab-uploads"
+    S3_ACCESS_KEY: str = ""
+    S3_SECRET_KEY: str = ""
+
     # Postgres
     # Credentials come only from the environment or .env.
     DATABASE_URL: str = "postgresql+asyncpg://cyberadmin@127.0.0.1:5432/cyberrange"

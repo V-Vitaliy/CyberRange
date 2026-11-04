@@ -15,7 +15,6 @@ langchain-community
 langchain-groq
 langchain-openai>=1.7.2,<2
 langgraph
-aiofiles
 python-multipart
 pypdf
 nltk

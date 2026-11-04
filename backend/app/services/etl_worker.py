@@ -70,6 +70,21 @@ class ETLWorker:
 
         return chunks
 
+    async def process_stored_pdf(
+        self, store, key: str, filename: str, task_id: UUID, redis: Redis, lab_instance_id: UUID
+    ) -> int:
+        """Background entry point: the document is read from object storage, not from the request."""
+        try:
+            content = await store.get(key)
+        except Exception:
+            logger.exception("Could not read %s from object storage", key)
+            await redis.hset(
+                f"etl_job:{task_id}",
+                mapping={"filename": filename, "status": "Failed", "progress": 100, "message": ETL_ERROR_MESSAGE},
+            )
+            return 0
+        return await self.process_pdf(content, filename, task_id, redis, lab_instance_id)
+
     async def process_pdf(
         self,
         file_content: bytes,

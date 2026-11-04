@@ -12,11 +12,11 @@ PyJWT
 bcrypt
 pypdf
 nltk
-aiofiles
 sentence_transformers
 asyncpg
 python-multipart
 httpx
+boto3
 tiktoken
 langchain
 langchain-core
