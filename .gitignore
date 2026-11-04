@@ -143,7 +143,7 @@ celerybeat.pid
 # Local agent instructions and working documentation
 /AGENTS.local.md
 /CLAUDE.md
-/docs/
+/docs/local/
 .envrc
 .venv
 env/

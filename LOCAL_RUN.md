@@ -216,8 +216,8 @@ The separately prepared demo uses `cyberrange_setup_test`; do not point the
 ordinary application's database configuration there accidentally. Existing demo
 connections are in `.local-sqli59/connections.json`, and its runtime map is
 `.local-sqli59/readers.json`. The production lab needs its own provisioned views
-and reader credentials. Preparation and real verification are documented in
-[ISSUE_59_ISOLATION.md](docs/tasks/ISSUE_59_ISOLATION.md).
+and reader credentials, prepared with `scripts/provision_sqli.py`. The isolation
+guarantees are verified by `backend/tests/integration/test_sqli_isolation_postgres.py`.
 
 ## 3. Starting the API and dashboard
 
