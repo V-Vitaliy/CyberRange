@@ -43,7 +43,9 @@ Follow `CONTRIBUTING.md`:
 - `backend/tests/`: backend tests (see below).
 - `frontend/src/`: Next.js UI; `frontend/tests/`: Node tests.
 - `scripts/`: database setup and SQLi provisioning CLIs.
-- `docs/` is gitignored and holds local working documents.
+- `docs/`: public project docs (`exercises.md` is the student-facing exercise catalog).
+  `docs/local/` is gitignored: working notes, plans and exercise solutions. Never put
+  attack paths or solutions in tracked docs; the repository is public.
 
 ## Tests
 - Every behavior change comes with tests. Never weaken assertions, add
