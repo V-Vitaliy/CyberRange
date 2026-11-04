@@ -5,7 +5,8 @@ from uuid import UUID
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.repository import AuditLogRepository, GameSessionRepository
+from app.db.repository import AuditLogRepository
+from app.labs.service import get_session
 from app.schemas.blue_team import InvestigateResponse
 
 
@@ -66,7 +67,7 @@ async def process_investigation(
     if log_entry.investigated_at is not None:
         raise HTTPException(status_code=400, detail="This log has already been investigated")
 
-    game_session = await GameSessionRepository.get_by_id(db, session_id, for_update=True)
+    game_session = await get_session(db, session_id, for_update=True)
     if not game_session or game_session.lab_instance_id != log_entry.lab_instance_id:
         raise HTTPException(status_code=404, detail="Log entry not found for this session")
 

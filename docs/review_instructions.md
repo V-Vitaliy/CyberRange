@@ -34,7 +34,7 @@ attacker's own lab** or removes them unintentionally.
    data, the control-plane database, Redis, Chroma, S3, Mailpit, the host or the
    internet. Check that the lab ID comes from server-side state or a signed
    claim, never from request input; every Chroma query filters by
-   `lab_instance_id`; session access goes through `get_authorized_session`; new
+   `lab_instance_id`; session access goes through `labs.service.get_authorized_session`; new
    object keys and SIEM events are lab-scoped.
 2. **Platform secrets and configuration.** No secrets, tokens, passwords or flags
    in code, tests, docs or logs. No usable defaults for credentials; services
