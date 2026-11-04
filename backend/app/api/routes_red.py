@@ -1,9 +1,7 @@
 import asyncio
 import logging
-import os
 import uuid
 
-import aiofiles
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -27,6 +25,7 @@ from app.core.redis_client import get_redis
 from app.core.security import create_access_token, get_authorized_session, get_current_user_vulnerable, verify_password
 from app.db.chroma_client import VectorStore, get_vector_store
 from app.db.database import get_db
+from app.db.object_store import ObjectStore, PathTraversalError, get_object_store, resolve_upload_target
 from app.db.repository import ChatRepository, UserRepository
 from app.db.sqli_isolation import IsolationError
 from app.db.sqli_search import HistoryQueryError
@@ -157,6 +156,7 @@ async def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     vector_store: VectorStore = Depends(get_vector_store),
+    store: ObjectStore = Depends(get_object_store),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user_vulnerable),
     redis=Depends(get_redis),
@@ -192,23 +192,12 @@ async def upload_document(
         },
     )
 
-    # Keep the uploads -> student_uploads traversal exercise inside this lab.
-    lab_root = os.path.realpath(os.path.join("lab_uploads", user["lab_instance_id"]))
     await redis.expire(redis_key, 3600)
-    base_upload_dir = os.path.join(lab_root, "uploads")
-    ALLOWED_PATH_PARTS = [os.path.join(lab_root, "student_uploads")]
 
-    absBase = os.path.realpath(base_upload_dir)
-    absallowed = tuple(os.path.realpath(dir) for dir in ALLOWED_PATH_PARTS)
-
-    os.makedirs(absBase, exist_ok=True)
-    for d in ALLOWED_PATH_PARTS:
-        os.makedirs(os.path.abspath(d), exist_ok=True)
-
-    vulnerable_path = os.path.join(base_upload_dir, file.filename)
-    validated_path = os.path.realpath(vulnerable_path)
-
-    if not any(os.path.commonpath([validated_path, root]) == root for root in (*absallowed, absBase)):
+    # The uploads -> student_uploads traversal exercise stays inside this lab's key prefix.
+    try:
+        target = resolve_upload_target(user["lab_instance_id"], file.filename)
+    except PathTraversalError:
         await log_security_event(
             db=db,
             lab_instance_id=user.get("lab_instance_id"),
@@ -218,49 +207,32 @@ async def upload_document(
         )
         raise HTTPException(status_code=403, detail="Wrong directory.")
 
-    os.makedirs(os.path.dirname(validated_path), exist_ok=True)
-    async with aiofiles.open(validated_path, "wb") as out_file:
-        await out_file.write(content)
+    await store.put(target.key, content)
+    await log_security_event(
+        db=db,
+        lab_instance_id=user.get("lab_instance_id"),
+        event_type="FILE_UPLOAD",
+        payload={"filename": file.filename, "destination": target.key, "indexing": str(target.indexed).lower()},
+        source_ip=request.client.host,
+    )
 
-    if any(os.path.commonpath([validated_path, root]) == root for root in absallowed):
-        await log_security_event(
-            db=db,
-            lab_instance_id=user.get("lab_instance_id"),
-            event_type="FILE_UPLOAD",
-            payload={"filename": file.filename, "destination": validated_path, "indexing": "true"},
-            source_ip=request.client.host,
+    if target.indexed:
+        background_tasks.add_task(
+            ETLWorker(vector_store).process_stored_pdf,
+            store,
+            target.key,
+            file.filename,
+            task_id,
+            redis,
+            uuid.UUID(user["lab_instance_id"]),
         )
+        return {"task_id": task_id, "message": "Processing started."}
 
-        try:
-            etl = ETLWorker(vector_store)
-            background_tasks.add_task(
-                etl.process_pdf,
-                content,
-                file.filename,
-                task_id,
-                redis,
-                uuid.UUID(user["lab_instance_id"]),
-            )
-
-            return {"task_id": task_id, "message": "Processing started."}
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=str(e))
-
-    else:
-        await log_security_event(
-            db=db,
-            lab_instance_id=user.get("lab_instance_id"),
-            event_type="FILE_UPLOAD",
-            payload={"filename": file.filename, "destination": validated_path, "indexing": "false"},
-            source_ip=request.client.host,
-        )
-
-        await redis.hset(
-            redis_key,
-            mapping={"status": "Completed (No ETL required)", "progress": 100, "message": "File uploaded securely."},
-        )
-
-        return {"task_id": str(task_id), "message": "File uploaded successfully.", "chunks_vectorized": 0}
+    await redis.hset(
+        redis_key,
+        mapping={"status": "Completed (No ETL required)", "progress": 100, "message": "File uploaded securely."},
+    )
+    return {"task_id": str(task_id), "message": "File uploaded successfully.", "chunks_vectorized": 0}
 
 
 @router.websocket("/ws/etl-status/{task_id}")

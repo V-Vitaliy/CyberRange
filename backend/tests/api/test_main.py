@@ -34,6 +34,8 @@ async def test_startup_uses_provider_factory_and_cleans_up_soc(monkeypatch):
     factory = Mock(return_value=model)
     monkeypatch.setattr(main, "create_llm", factory)
     monkeypatch.setattr(main, "VectorStore", Mock())
+    object_store = Mock()
+    monkeypatch.setattr(main, "ObjectStore", object_store)
     cancelled = asyncio.Event()
 
     async def worker(graph, queue):
@@ -48,6 +50,7 @@ async def test_startup_uses_provider_factory_and_cleans_up_soc(monkeypatch):
         assert main.app.state.llm is model
         assert main.red_app.state.llm is model
         assert main.blue_app.state.llm is model
+        assert main.red_app.state.object_store is object_store.from_settings.return_value
     assert cancelled.is_set()
     factory.assert_called_once_with()
 
@@ -58,6 +61,7 @@ async def test_unsupported_local_soc_does_not_prevent_local_api_startup(monkeypa
     model.with_structured_output.side_effect = NotImplementedError("no structured output")
     monkeypatch.setattr(main, "create_llm", Mock(return_value=model))
     monkeypatch.setattr(main, "VectorStore", Mock())
+    monkeypatch.setattr(main, "ObjectStore", Mock())
     worker = AsyncMock()
     monkeypatch.setattr(main, "run_soc_analyst_loop", worker)
     async with main.lifespan(main.app):
@@ -141,12 +145,14 @@ async def test_bearer_header_reaches_existing_auth_checks(monkeypatch, side):
 @pytest.mark.asyncio
 async def test_startup_refuses_weak_jwt_secret_before_loading_models(monkeypatch):
     monkeypatch.setattr(main.settings, "JWT_SECRET", "super-secret-blue-team-key")
-    vector_store = Mock()
+    vector_store, object_store = Mock(), Mock()
     monkeypatch.setattr(main, "VectorStore", vector_store)
+    monkeypatch.setattr(main, "ObjectStore", object_store)
     with pytest.raises(RuntimeError, match="JWT_SECRET"):
         async with main.lifespan(main.app):
             pass
     vector_store.assert_not_called()
+    object_store.from_settings.assert_not_called()
 
 
 @pytest.mark.asyncio

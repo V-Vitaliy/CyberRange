@@ -105,3 +105,12 @@ def test_frontend_origins_default_to_local_dev_server_and_can_be_overridden(monk
     assert Settings(_env_file=None).FRONTEND_ORIGINS == ["http://localhost:3000", "http://127.0.0.1:3000"]
     monkeypatch.setenv("FRONTEND_ORIGINS", '["https://range.example"]')
     assert Settings(_env_file=None).FRONTEND_ORIGINS == ["https://range.example"]
+
+
+def test_object_storage_settings_default_to_local_gateway_without_credentials(monkeypatch):
+    for key in ("S3_ENDPOINT_URL", "S3_BUCKET", "S3_ACCESS_KEY", "S3_SECRET_KEY"):
+        monkeypatch.delenv(key, raising=False)
+    settings = Settings(_env_file=None)
+    assert settings.S3_ENDPOINT_URL == "http://localhost:8333"
+    assert settings.S3_BUCKET == "lab-uploads"
+    assert settings.S3_ACCESS_KEY == settings.S3_SECRET_KEY == ""
