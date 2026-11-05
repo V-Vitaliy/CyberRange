@@ -11,7 +11,7 @@ from langchain_core.messages import AIMessageChunk
 
 from app.agents.tools import email_tool
 from app.agents.tools.email_tool import send_email
-from app.core import llm_engine
+from app.chat import llm_engine
 from tests.openai_doubles import assert_request, make_model, sse
 
 

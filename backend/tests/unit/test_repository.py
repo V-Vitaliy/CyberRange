@@ -5,8 +5,8 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
+from app.chat.repository import ChatRepository
 from app.db.models import ChatThread
-from app.db.repository import ChatRepository
 
 
 @pytest.mark.asyncio

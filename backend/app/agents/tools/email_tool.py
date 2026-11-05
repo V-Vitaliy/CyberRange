@@ -5,8 +5,8 @@ from langchain_core.tools import tool
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.agents.tools.base import AgentTool, ToolResult
+from app.agents.tools.email_service import EmailService
 from app.core.config import settings
-from app.services.email_service import EmailService
 
 logger = logging.getLogger(__name__)
 

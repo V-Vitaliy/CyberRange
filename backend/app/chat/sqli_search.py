@@ -10,8 +10,8 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
+from app.chat.sqli_isolation import IsolationError, LabObjects, check_reader_boundary
 from app.core.config import ROOT_DIR, settings
-from app.db.sqli_isolation import IsolationError, LabObjects, check_reader_boundary
 
 
 class HistoryQueryError(Exception):

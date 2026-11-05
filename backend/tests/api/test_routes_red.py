@@ -7,15 +7,16 @@ from uuid import uuid4
 import httpx
 import pytest
 
-from app.api import routes_red
 from app.auth.service import get_current_user_vulnerable
+from app.chat import router as chat_router
+from app.chat.repository import ChatRepository
+from app.chat.sqli_isolation import IsolationError
+from app.chat.sqli_search import HistoryQueryError
 from app.core.redis_client import get_redis
-from app.db.chroma_client import get_vector_store
 from app.db.database import get_db
-from app.db.object_store import get_object_store
-from app.db.repository import ChatRepository
-from app.db.sqli_isolation import IsolationError
-from app.db.sqli_search import HistoryQueryError
+from app.documents import router as documents_router
+from app.documents.chroma_client import get_vector_store
+from app.documents.object_store import get_object_store
 from app.labs.repository import GameSessionRepository
 from app.llm import provider
 from app.main import app, red_app
@@ -60,7 +61,8 @@ def _install_rejecting_search_spy(monkeypatch):
 
 def _install_log_spy(monkeypatch):
     log_event = AsyncMock()
-    monkeypatch.setattr(routes_red, "log_security_event", log_event)
+    monkeypatch.setattr(documents_router, "log_security_event", log_event)
+    monkeypatch.setattr(chat_router, "log_security_event", log_event)
     return log_event
 
 
@@ -151,7 +153,7 @@ def history(monkeypatch):
     search = AsyncMock(return_value=([{"title": "normal", "messages": []}], "synthetic SQL"))
     monkeypatch.setattr(ChatRepository, "search_chat_history_vulnerable", search)
     log = AsyncMock()
-    monkeypatch.setattr(routes_red, "log_security_event", log)
+    monkeypatch.setattr(chat_router, "log_security_event", log)
     try:
         yield SimpleNamespace(lab=lab, session=session, search=search, log=log, db=db)
     finally:
@@ -212,8 +214,10 @@ def upload(monkeypatch, tmp_path):
         store=SimpleNamespace(put=AsyncMock()),
         root=tmp_path,
     )
-    monkeypatch.setattr(routes_red, "log_security_event", env.log)
-    monkeypatch.setattr(routes_red, "ETLWorker", Mock(return_value=SimpleNamespace(process_stored_pdf=env.process_pdf)))
+    monkeypatch.setattr(documents_router, "log_security_event", env.log)
+    monkeypatch.setattr(
+        documents_router, "ETLWorker", Mock(return_value=SimpleNamespace(process_stored_pdf=env.process_pdf))
+    )
 
     async def current_user():
         return env.user
@@ -293,7 +297,7 @@ async def test_upload_keeps_traversal_exercise_inside_own_lab(upload, filename, 
     [(b"%PDF-" + b"x" * 64, 413), (b"MZ not a pdf", 415)],
 )
 async def test_upload_rejects_oversized_or_non_pdf_before_storing(upload, monkeypatch, content, status):
-    monkeypatch.setattr(routes_red.settings, "UPLOAD_MAX_BYTES", 32)
+    monkeypatch.setattr(documents_router.settings, "UPLOAD_MAX_BYTES", 32)
     response = await upload.post("../student_uploads/poison.pdf", content)
     assert response.status_code == status
     upload.store.put.assert_not_awaited()
@@ -306,16 +310,16 @@ async def test_upload_rejects_oversized_or_non_pdf_before_storing(upload, monkey
 @pytest.mark.asyncio
 async def test_etl_socket_rejects_foreign_job(monkeypatch):
     user = dict(id=str(uuid4()), lab_instance_id=str(uuid4()))
-    monkeypatch.setattr(routes_red, "get_current_user_vulnerable", AsyncMock(return_value=user))
+    monkeypatch.setattr(documents_router, "get_current_user_vulnerable", AsyncMock(return_value=user))
     redis = AsyncMock()
     redis.hgetall.return_value = dict(user_id=str(uuid4()), lab_instance_id=user["lab_instance_id"])
     socket = SimpleNamespace(headers={}, close=AsyncMock(), accept=AsyncMock())
-    await routes_red.etl_status_websocket(socket, uuid4(), redis, object())
+    await documents_router.etl_status_websocket(socket, uuid4(), redis, object())
     socket.close.assert_awaited_once_with(code=1008)
     socket.accept.assert_not_awaited()
 
 
 def test_chat_route_takes_model_from_provider_dependency():
-    route = next(route for route in routes_red.router.routes if route.path == "/chat/ask")
+    route = next(route for route in chat_router.router.routes if route.path == "/chat/ask")
     calls = [dependency.call for dependency in route.dependant.dependencies]
     assert provider.get_llm_instance in calls

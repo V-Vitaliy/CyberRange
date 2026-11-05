@@ -15,8 +15,8 @@ async def run(lab_id, password):
     from sqlalchemy.engine import make_url
     from sqlalchemy.ext.asyncio import create_async_engine
 
+    from app.chat.sqli_isolation import IsolationError, provision_lab
     from app.core.config import settings
-    from app.db.sqli_isolation import IsolationError, provision_lab
 
     url = make_url(settings.DATABASE_URL)
     if url.drivername != "postgresql+asyncpg":

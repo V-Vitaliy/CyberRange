@@ -46,7 +46,7 @@ uploaded objects all carry the lab ID.
   - Chroma queries always filter by `lab_instance_id`;
   - object keys always start with the caller's lab ID;
   - the SQLi exercise runs as a per-lab, read-only PostgreSQL role that sees only
-    `security_barrier` views filtered by the lab ID (`db/sqli_isolation.py`).
+    `security_barrier` views filtered by the lab ID (`chat/sqli_isolation.py`).
 
 ## Authentication and roles
 
@@ -72,14 +72,14 @@ Implemented in `auth/` (`service.py`, logins in `router.py`).
   resolved under the lab prefix → stored in S3 → files in `student_uploads/` are
   indexed by a background ETL job; progress is in Redis and streamed over
   `/api/red/ws/etl-status/{task_id}`.
-- **SIEM**: `services/siem_logger.log_security_event` writes lab-scoped events
-  to `security_audit_logs`. The Blue Team reads them; `services/forensics.py`
+- **SIEM**: `siem.service.log_security_event` writes lab-scoped events
+  to `security_audit_logs`. The Blue Team reads them; `siem/forensics.py`
   scores investigations.
-- **Auto-SOC** (`services/soc_worker.py`): for solo labs, polls uninvestigated
+- **Auto-SOC** (`siem/soc_worker.py`): for solo labs, polls uninvestigated
   events, asks the LangGraph SOC agent (`agents/soc_agent.py`) for a structured
   verdict and saves it in a short transaction. No transaction is open while the
   model runs. An unreachable model pauses analysis with backoff.
-- **Defenses** (`services/defense.py`): Blue Team spends points to enable
+- **Defenses** (`defense/service.py`): Blue Team spends points to enable
   per-session switches (system prompt patch, rate limiter, reranker, JWT strict
   mode).
 
@@ -100,23 +100,23 @@ Implemented in `auth/` (`service.py`, logins in `router.py`).
 | Package | Contents |
 |---|---|
 | `main.py` | App, mounted `red_app` / `blue_app`, lifespan (secret check, stores, model, SOC task), CORS, body size limit |
-| `api/` | Routers: `routes_red.py`, `routes_blue.py` |
-| `core/` | `config.py` (settings), `llm_engine.py` (model streaming), `prompt_builder.py`, `queue_manager.py`, `redis_client.py` |
+| `core/` | `config.py` (settings), `queue_manager.py`, `redis_client.py` |
 | `llm/` | `provider.py`: model factory (OpenAI-compatible, Groq, local GGUF) |
-| `agents/` | `soc_agent.py` (LangGraph SOC analyst), `tools/` (tool registry: schema, risk level, audited handler; `send_email`) |
-| `services/` | `rag_service.py`, `etl_worker.py`, `soc_worker.py`, `forensics.py`, `defense.py`, `rate_limiter.py`, `email_service.py`, `siem_logger.py` |
-| `db/` | `models.py`, `repository.py`, `database.py`, `chroma_client.py`, `object_store.py`, `sqli_isolation.py`, `sqli_search.py` |
-| `auth/` | Users and login: `repository.py` (`UserRepository`), `service.py` (passwords, JWT, `authenticate`, `get_current_user_secure`, `get_blue_team_user`, `get_current_user_vulnerable`), `router.py` (Red and Blue `POST /login`), `schemas.py` |
+| `agents/` | `soc_agent.py` (LangGraph SOC analyst), `tools/` (tool registry: schema, risk level, audited handler; `send_email` with `email_service.py`) |
+| `db/` | `models.py`, `database.py`, `ids.py` (`ensure_uuid`) |
+| `auth/` | Users and login: `repository.py` (`UserRepository`), `service.py` (passwords, JWT, `authenticate`, `get_current_user_secure`, `get_blue_team_user`, `get_current_user_vulnerable`), `router.py` (Red and Blue `POST /login`, Blue `GET /me`), `schemas.py` |
+| `chat/` | Red Team chat: `repository.py` (`ChatRepository`), `service.py` (RAG pipeline and SSE, thread lookup, history search), `llm_engine.py` (model streaming), `prompt_builder.py`, `sqli_isolation.py` and `sqli_search.py` (lab-isolated SQLi exercise), `router.py` (`/chat/ask`, `/chat/history`), `schemas.py` |
 | `ctf/` | Flag submission: `repository.py` (`CtfRepository`), `service.py` (`hash_ctf_flag`, `submit_flag`), `router.py` (`POST /api/red/ctf/submit`), `schemas.py` |
+| `defense/` | Defense shop and rate limit: `service.py` (`process_defense_purchase`, `enforce_rate_limit`), `router.py` (`POST /api/blue/defenses/buy`), `schemas.py` |
+| `documents/` | Uploads and RAG documents: `service.py` (`ETLWorker`: PDF parsing, chunking, embedding), `object_store.py` (S3 uploads, lab-prefixed keys), `chroma_client.py` (`VectorStore`), `router.py` (`POST /api/red/upload`, `/api/red/ws/etl-status/{task_id}`) |
 | `labs/` | Game sessions: `repository.py` (`GameSessionRepository`), `service.py` (`get_session`, `get_session_for_lab`, `get_authorized_session`) |
-| `schemas/` | Pydantic request/response models |
+| `siem/` | SIEM events: `repository.py` (`AuditLogRepository`), `service.py` (`log_security_event` for every domain, dashboard stats, logs), `forensics.py` (Blue Team investigation), `soc_worker.py` (Auto-SOC loop), `router.py` (`/investigate`, `/dashboard`, `/logs`), `schemas.py` |
 
-Dependencies point inward: routers → services → repositories. `core/` must not
-import domain repositories. Domain packages (`app/<domain>/` with router,
-service, repository and schemas as needed) are introduced step by step (ARC-3):
-`labs`, `auth` and `ctf` are migrated; `defense`, `siem`, `chat` and `documents`
-follow. Other code uses a domain's `service`, never its `repository`; this is
-enforced by `backend/tests/unit/test_architecture.py`.
+Each domain package (`app/<domain>/`) holds its `router.py`, `service.py`,
+`repository.py` and `schemas.py` as needed. Dependencies point inward: routers →
+services → repositories. Other domains use a domain's `service`, never its
+`repository`; `core/` imports no repository; each route is declared in its
+domain's router. `backend/tests/unit/test_architecture.py` enforces these rules.
 
 ## Configuration and secrets
 

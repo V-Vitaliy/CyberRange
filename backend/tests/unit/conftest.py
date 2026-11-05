@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from app.agents.tools import email_tool, registry
-from app.services.email_service import EmailService
+from app.agents.tools.email_service import EmailService
 
 
 @pytest.fixture

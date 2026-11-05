@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ctf.repository import CtfRepository
 from app.labs.service import get_session_for_lab
-from app.services.siem_logger import log_security_event
+from app.siem.service import log_security_event
 
 
 def hash_ctf_flag(flag_value: str) -> str:

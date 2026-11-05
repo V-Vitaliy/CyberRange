@@ -22,10 +22,10 @@ async def prepare():
     from sqlalchemy.engine import make_url
     from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
+    from app.chat.sqli_isolation import provision_lab
     from app.core.config import settings
     from app.db.database import Base
     from app.db.models import ChatThread, GameSession, SecurityAuditLog, User
-    from app.db.sqli_isolation import provision_lab
 
     url = make_url(settings.DATABASE_URL).set(database="cyberrange_setup_test")
     if url.drivername != "postgresql+asyncpg" or url.host not in ("localhost", "127.0.0.1"):
