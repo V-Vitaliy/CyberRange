@@ -14,11 +14,11 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from app.api import routes_ctf
-from app.core.security import create_access_token
+from app.auth.service import create_access_token
+from app.ctf import service as ctf_service
+from app.ctf.repository import CtfRepository
 from app.db.database import get_db
 from app.db.models import CtfFlag, CtfSubmission, GameSession, User
-from app.db.repository import CtfRepository
 from app.main import app, red_app
 
 
@@ -77,7 +77,7 @@ def ctf(monkeypatch):
         prior = dict(red_app.dependency_overrides)
         red_app.dependency_overrides[get_db] = database
         log = AsyncMock()
-        monkeypatch.setattr(routes_ctf, "log_security_event", log)
+        monkeypatch.setattr(ctf_service, "log_security_event", log)
         try:
             yield SimpleNamespace(
                 db=db, session=session, labs=labs, teams=teams, users=users, tokens=tokens, flags=flags, log=log

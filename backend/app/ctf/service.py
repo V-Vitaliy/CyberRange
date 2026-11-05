@@ -1,24 +1,22 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+"""Flag submission for Red Team players."""
+
+import hashlib
+
+from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import get_current_user_vulnerable, hash_ctf_flag
-from app.db.database import get_db
-from app.db.repository import CtfRepository
+from app.ctf.repository import CtfRepository
 from app.labs.service import get_session_for_lab
-from app.schemas.ctf_schemas import CtfSubmitRequest
 from app.services.siem_logger import log_security_event
 
-router = APIRouter()
+
+def hash_ctf_flag(flag_value: str) -> str:
+    """Hashes a CTF flag value using SHA-256 for secure database storage and comparison."""
+    return hashlib.sha256(flag_value.encode("utf-8")).hexdigest()
 
 
-@router.post("/submit", tags=["Red Team - CTF"])
-async def submit_flag(
-    request: CtfSubmitRequest, db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user_vulnerable)
-):
-    """
-    Endpoint for Red Team to submit captured flags.
-    No UI for this, designed to be used via cURL/Postman or CLI.
-    """
+async def submit_flag(db: AsyncSession, user: dict, flag_value: str) -> dict:
+    """Credit a flag of the player's own lab to their team, once."""
     user_id = user.get("id")
     lab_instance_id = user.get("lab_instance_id")
 
@@ -32,7 +30,7 @@ async def submit_flag(
 
     team_id = game_session.team_id
 
-    hashed_submission = hash_ctf_flag(request.flag_value)
+    hashed_submission = hash_ctf_flag(flag_value)
 
     flag = await CtfRepository.get_flag_by_value(db, hashed_submission, lab_instance_id)
 
@@ -41,7 +39,7 @@ async def submit_flag(
             db=db,
             lab_instance_id=lab_instance_id,
             event_type="CTF_SUBMIT_FAILED",
-            payload={"attempted_flag": request.flag_value},
+            payload={"attempted_flag": flag_value},
             source_ip="CTF_ENGINE",
         )
         raise HTTPException(status_code=400, detail="Invalid flag.")

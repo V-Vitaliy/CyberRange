@@ -11,10 +11,11 @@ from langchain_core.runnables import RunnableLambda
 
 from app import main
 from app.agents.soc_agent import AnalysisOutput
-from app.api import routes_ctf
-from app.core.security import create_access_token
+from app.auth.repository import UserRepository
+from app.auth.service import create_access_token
+from app.ctf import service as ctf_service
+from app.ctf.repository import CtfRepository
 from app.db.database import get_db
-from app.db.repository import CtfRepository, UserRepository
 from app.labs.repository import GameSessionRepository
 from app.main import app, blue_app, red_app
 
@@ -102,7 +103,7 @@ async def test_bearer_header_reaches_existing_auth_checks(monkeypatch, side):
     monkeypatch.setattr(GameSessionRepository, "get_by_lab_instance_id", AsyncMock(return_value=session))
     flag_lookup = AsyncMock(return_value=None)
     monkeypatch.setattr(CtfRepository, "get_flag_by_value", flag_lookup)
-    monkeypatch.setattr(routes_ctf, "log_security_event", AsyncMock())
+    monkeypatch.setattr(ctf_service, "log_security_event", AsyncMock())
     token = create_access_token(
         dict(sub=user.username, role=user.role, id=str(user.id), lab_instance_id=str(user.lab_instance_id))
     )
@@ -183,7 +184,8 @@ async def test_cors_allows_only_configured_frontend_origins(client, origin, allo
 async def test_login_password_check_runs_off_the_event_loop(monkeypatch, side):
     import threading
 
-    from app.api import routes_blue, routes_red
+    from app.auth import router as auth_router
+    from app.auth import service as auth_service
 
     user = SimpleNamespace(
         id=uuid4(), username="test-user", role=side + "_team", lab_instance_id=uuid4(), password_hash="hash"
@@ -195,8 +197,8 @@ async def test_login_password_check_runs_off_the_event_loop(monkeypatch, side):
         threads.append(threading.get_ident())
         return True
 
-    monkeypatch.setattr(routes_red if side == "red" else routes_blue, "verify_password", verify)
-    monkeypatch.setattr(routes_red, "log_security_event", AsyncMock())
+    monkeypatch.setattr(auth_service, "verify_password", verify)
+    monkeypatch.setattr(auth_router, "log_security_event", AsyncMock())
     sub_app = red_app if side == "red" else blue_app
 
     async def database():

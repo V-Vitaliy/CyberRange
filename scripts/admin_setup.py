@@ -148,8 +148,8 @@ async def run_setup(options):
     from sqlalchemy.engine import make_url
     from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
+    from app.auth.service import get_password_hash
     from app.core.config import settings
-    from app.core.security import get_password_hash
     from app.db.database import Base
     from app.db.models import GameSession, User
 

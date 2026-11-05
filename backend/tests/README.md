@@ -3,12 +3,12 @@
 Tests are grouped by the module they verify. Add new tests to the existing file
 of that module instead of creating a file per task.
 
-- `unit/test_<module>.py`: one file per application module (`config`, `security`,
+- `unit/test_<module>.py`: one file per application module (`config`, `auth`, `ctf`, `labs`,
   `llm_engine`, `rag_service`, `soc`, `defense`, ...). `unit/test_admin_setup.py`
   covers `scripts/admin_setup.py` with doubles and can also run with standard-library
   `unittest` and no backend dependencies.
 - `api/test_<router>.py`: HTTP/WebSocket routes (`routes_red`, `routes_blue`,
-  `routes_ctf`) and application wiring (`main`).
+  `routes_ctf` for `ctf/router.py`) and application wiring (`main`).
 - `integration/`: opt-in tests against real PostgreSQL.
 - Shared fixtures: `conftest.py` (ASGI client) and `unit/conftest.py` (email tool
   harness). `openai_doubles.py` holds offline HTTP doubles for the OpenAI-compatible
