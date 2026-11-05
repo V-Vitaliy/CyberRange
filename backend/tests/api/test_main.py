@@ -11,11 +11,11 @@ from langchain_core.runnables import RunnableLambda
 
 from app import main
 from app.agents.soc_agent import AnalysisOutput
-from app.api import routes_ctf
 from app.auth.repository import UserRepository
 from app.auth.service import create_access_token
+from app.ctf import service as ctf_service
+from app.ctf.repository import CtfRepository
 from app.db.database import get_db
-from app.db.repository import CtfRepository
 from app.labs.repository import GameSessionRepository
 from app.main import app, blue_app, red_app
 
@@ -103,7 +103,7 @@ async def test_bearer_header_reaches_existing_auth_checks(monkeypatch, side):
     monkeypatch.setattr(GameSessionRepository, "get_by_lab_instance_id", AsyncMock(return_value=session))
     flag_lookup = AsyncMock(return_value=None)
     monkeypatch.setattr(CtfRepository, "get_flag_by_value", flag_lookup)
-    monkeypatch.setattr(routes_ctf, "log_security_event", AsyncMock())
+    monkeypatch.setattr(ctf_service, "log_security_event", AsyncMock())
     token = create_access_token(
         dict(sub=user.username, role=user.role, id=str(user.id), lab_instance_id=str(user.lab_instance_id))
     )
