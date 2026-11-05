@@ -1,0 +1,91 @@
+"""Chat threads; other domains use app.chat.service, not this repository."""
+
+import datetime
+import uuid
+from typing import List
+
+from fastapi import HTTPException
+from sqlalchemy import desc
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+from sqlalchemy.orm.attributes import flag_modified
+
+from app.db.models import ChatThread
+from app.db.repository import ensure_uuid
+
+
+class ChatRepository:
+    """Handles all database operations for Chat Threads (Red Team UI)."""
+
+    @staticmethod
+    async def search_chat_history_vulnerable(lab_id, session_id, query):
+        # Never accept the control-plane AsyncSession for injectable SQL.
+        from app.chat.sqli_search import search_history
+
+        return await search_history(lab_id, session_id, query)
+
+    @staticmethod
+    async def get_threads_by_user_and_session(
+        db: AsyncSession, user_id: str | uuid.UUID, session_id: str | uuid.UUID
+    ) -> List[ChatThread]:
+        """Fetches chat history for the left sidebar."""
+        result = await db.execute(
+            select(ChatThread)
+            .where(ChatThread.user_id == ensure_uuid(user_id), ChatThread.session_id == ensure_uuid(session_id))
+            .order_by(desc(ChatThread.updated_at))
+        )
+        return list(result.scalars().all())
+
+    @staticmethod
+    async def get_or_create_thread(
+        db: AsyncSession,
+        thread_id: str | uuid.UUID,
+        user_id: str | uuid.UUID,
+        session_id: str | uuid.UUID,
+        initial_prompt: str,
+    ) -> ChatThread:
+        """Retrieves an existing thread"""
+        if not thread_id:
+            raise ValueError("Thread ID is required from the client")
+
+        result = await db.execute(select(ChatThread).where(ChatThread.id == ensure_uuid(thread_id)))
+        thread = result.scalars().first()
+
+        if thread:
+            if thread.user_id != ensure_uuid(user_id) or thread.session_id != ensure_uuid(session_id):
+                raise HTTPException(status_code=404, detail="Chat thread not found")
+            return thread
+
+        new_thread = ChatThread(
+            id=ensure_uuid(thread_id),
+            user_id=ensure_uuid(user_id),
+            session_id=ensure_uuid(session_id),
+            title=initial_prompt[:30] + "..." if len(initial_prompt) > 30 else initial_prompt,
+            messages=[],
+        )
+        db.add(new_thread)
+        await db.commit()
+        await db.refresh(new_thread)
+        return new_thread
+
+    @staticmethod
+    async def append_messages(db: AsyncSession, thread_id: str | uuid.UUID, prompt: str, ai_response: str):
+        """Appends a new user prompt and AI response to the thread's JSONB message list."""
+        result = await db.execute(select(ChatThread).where(ChatThread.id == ensure_uuid(thread_id)))
+        thread = result.scalars().first()
+
+        if thread:
+            timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+            new_messages = [
+                {"role": "user", "content": prompt, "timestamp": timestamp},
+                {"role": "ai", "content": ai_response, "timestamp": timestamp},
+            ]
+
+            if not isinstance(thread.messages, list):
+                thread.messages = []
+
+            thread.messages.extend(new_messages)
+
+            flag_modified(thread, "messages")
+            await db.commit()

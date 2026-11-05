@@ -9,13 +9,14 @@ import pytest
 
 from app.api import routes_red
 from app.auth.service import get_current_user_vulnerable
+from app.chat import router as chat_router
+from app.chat.repository import ChatRepository
+from app.chat.sqli_isolation import IsolationError
+from app.chat.sqli_search import HistoryQueryError
 from app.core.redis_client import get_redis
 from app.db.chroma_client import get_vector_store
 from app.db.database import get_db
 from app.db.object_store import get_object_store
-from app.db.repository import ChatRepository
-from app.db.sqli_isolation import IsolationError
-from app.db.sqli_search import HistoryQueryError
 from app.labs.repository import GameSessionRepository
 from app.llm import provider
 from app.main import app, red_app
@@ -61,6 +62,7 @@ def _install_rejecting_search_spy(monkeypatch):
 def _install_log_spy(monkeypatch):
     log_event = AsyncMock()
     monkeypatch.setattr(routes_red, "log_security_event", log_event)
+    monkeypatch.setattr(chat_router, "log_security_event", log_event)
     return log_event
 
 
@@ -151,7 +153,7 @@ def history(monkeypatch):
     search = AsyncMock(return_value=([{"title": "normal", "messages": []}], "synthetic SQL"))
     monkeypatch.setattr(ChatRepository, "search_chat_history_vulnerable", search)
     log = AsyncMock()
-    monkeypatch.setattr(routes_red, "log_security_event", log)
+    monkeypatch.setattr(chat_router, "log_security_event", log)
     try:
         yield SimpleNamespace(lab=lab, session=session, search=search, log=log, db=db)
     finally:
@@ -316,6 +318,6 @@ async def test_etl_socket_rejects_foreign_job(monkeypatch):
 
 
 def test_chat_route_takes_model_from_provider_dependency():
-    route = next(route for route in routes_red.router.routes if route.path == "/chat/ask")
+    route = next(route for route in chat_router.router.routes if route.path == "/chat/ask")
     calls = [dependency.call for dependency in route.dependant.dependencies]
     assert provider.get_llm_instance in calls

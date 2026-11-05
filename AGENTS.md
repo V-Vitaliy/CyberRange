@@ -39,14 +39,15 @@ Follow `CONTRIBUTING.md`:
 - `backend/app/`: FastAPI application.
   - Domain packages `app/<domain>/` (`router.py`, `service.py`, `repository.py`,
     `schemas.py` as needed). Migrated so far: `labs/` (game sessions), `auth/`
-    (users, passwords, JWT, login routes), `ctf/` (flag submission), `defense/`
-    (defense shop, rate limit), `siem/` (events, investigation, Auto-SOC). Other
-    domains use a domain's `service`, never its `repository`;
+    (users, passwords, JWT, login routes), `chat/` (RAG chat, SQLi history),
+    `ctf/` (flag submission), `defense/` (defense shop, rate limit), `siem/`
+    (events, investigation, Auto-SOC). Other domains use a domain's `service`,
+    never its `repository`;
     `tests/unit/test_architecture.py` enforces this.
   - Not yet migrated (ARC-3): `api/` routes, `services/` business logic,
-    `db/repository.py`. Shared: `core/` configuration and LLM engine,
+    `db/repository.py`. Shared: `core/` configuration, queue and Redis,
     `db/` models and database, `llm/` model factory, `agents/` LangGraph agents
-    and tools, `schemas/` request/response models.
+    and tools.
 - `backend/tests/`: backend tests (see below).
 - `frontend/src/`: Next.js UI; `frontend/tests/`: Node tests.
 - `scripts/`: database setup and SQLi provisioning CLIs.

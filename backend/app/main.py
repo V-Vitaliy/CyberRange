@@ -10,6 +10,7 @@ from app.agents.soc_agent import create_soc_graph
 from app.api.routes_red import router as red_router
 from app.auth.router import blue_router as blue_auth_router
 from app.auth.router import red_router as red_auth_router
+from app.chat.router import router as chat_router
 from app.core.config import require_strong_jwt_secret, settings
 from app.core.queue_manager import LLMQueueManager
 from app.ctf.router import router as ctf_router
@@ -27,6 +28,7 @@ red_app = FastAPI(
     version="1.0.0",
 )
 red_app.include_router(red_auth_router, prefix="")
+red_app.include_router(chat_router, prefix="")
 red_app.include_router(red_router, prefix="")
 red_app.include_router(ctf_router, prefix="/ctf")
 

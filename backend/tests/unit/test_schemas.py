@@ -3,8 +3,8 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
+from app.chat.schemas import ChatRequest
 from app.core.config import settings
-from app.schemas.red_team import ChatRequest
 
 
 @pytest.mark.parametrize("length", [0, settings.PROMPT_MAX_CHARS + 1])
