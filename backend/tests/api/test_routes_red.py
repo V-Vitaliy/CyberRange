@@ -173,7 +173,7 @@ async def test_history_awaits_lab_search_and_preserves_response(history, query):
     event = history.log.call_args.kwargs
     assert event["event_type"] == "DB_QUERY"
     assert event["payload"] == {"query_param": query, "target": "chat_history"}
-    assert event["db"] is history.db
+    assert "db" not in event  # SIEM writes in its own session, not the request one.
 
 
 @pytest.mark.asyncio
@@ -323,3 +323,16 @@ def test_chat_route_takes_model_from_provider_dependency():
     route = next(route for route in chat_router.router.routes if route.path == "/chat/ask")
     calls = [dependency.call for dependency in route.dependant.dependencies]
     assert provider.get_llm_instance in calls
+
+
+@pytest.mark.asyncio
+async def test_etl_socket_passes_its_connection_to_authentication(monkeypatch):
+    from fastapi import HTTPException
+
+    auth = AsyncMock(side_effect=HTTPException(status_code=401))
+    monkeypatch.setattr(documents_router, "get_current_user_vulnerable", auth)
+    socket = SimpleNamespace(headers={"authorization": "Bearer forged"}, close=AsyncMock(), accept=AsyncMock())
+    db = object()
+    await documents_router.etl_status_websocket(socket, uuid4(), AsyncMock(), db)
+    auth.assert_awaited_once_with("Bearer forged", db, socket)
+    socket.close.assert_awaited_once_with(code=1008)

@@ -60,6 +60,10 @@ Implemented in `auth/` (`service.py`, logins in `router.py`).
   verifying it, but takes identity and lab from `lab_scope`; this is an
   intentional exercise. The "JWT Strict Mode" defense switches it to full
   verification.
+- A claimed role that differs from the stored one is logged as
+  `AUTH_BYPASS_ATTEMPT` (claimed role, source IP, `blocked` when Strict Mode
+  rejects it) in the student's own lab, at most once per user, role and outcome
+  per 15 minutes (de-duplicated in Redis; logged every time if Redis is down).
 
 ## Request flows
 
@@ -73,7 +77,8 @@ Implemented in `auth/` (`service.py`, logins in `router.py`).
   indexed by a background ETL job; progress is in Redis and streamed over
   `/api/red/ws/etl-status/{task_id}`.
 - **SIEM**: `siem.service.log_security_event` writes lab-scoped events
-  to `security_audit_logs`. The Blue Team reads them; `siem/forensics.py`
+  to `security_audit_logs` in its own database session, so a failed write never
+  commits or rolls back the request's transaction. The Blue Team reads them; `siem/forensics.py`
   scores investigations.
 - **Auto-SOC** (`siem/soc_worker.py`): for solo labs, polls uninvestigated
   events, asks the LangGraph SOC agent (`agents/soc_agent.py`) for a structured

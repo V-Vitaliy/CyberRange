@@ -108,7 +108,6 @@ async def enforce_rate_limit(db: AsyncSession, redis: Redis, session_id: UUID, c
 
         # Log the DoS attempt into SIEM
         await log_security_event(
-            db=db,
             lab_instance_id=str(session.lab_instance_id),
             event_type="DOS_ATTEMPT_BLOCKED",
             payload={

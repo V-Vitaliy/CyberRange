@@ -9,6 +9,7 @@ import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.requests import HTTPConnection
 
 from app.auth.repository import UserRepository
 from app.core.config import settings
@@ -16,6 +17,7 @@ from app.db.database import get_db
 from app.db.ids import ensure_uuid
 from app.db.models import User
 from app.labs.service import get_session_for_lab
+from app.siem.service import log_jwt_manipulation_attempt
 
 
 # ---------------------------------------------------------
@@ -126,8 +128,13 @@ async def get_blue_team_user(user: User = Depends(get_current_user_secure)) -> U
 async def get_current_user_vulnerable(
     authorization: str | None = Depends(get_bearer_authorization),
     db: AsyncSession = Depends(get_db),
+    connection: HTTPConnection = None,
 ) -> dict:
-    """Allow role forgery only within the authenticated student's laboratory."""
+    """Allow role forgery only within the authenticated student's laboratory.
+
+    A claimed role that differs from the stored one is logged in the student's own lab,
+    whether JWT Strict Mode lets it through or rejects it.
+    """
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
     token = authorization.split(" ", 1)[1]
@@ -154,15 +161,33 @@ async def get_current_user_vulnerable(
         session = await get_session_for_lab(db, user.lab_instance_id)
         if session is None:
             raise ValueError("Game session not found")
+        claimed_role = payload.get("role")
+
+        async def log_forgery(blocked):
+            if claimed_role != user.role:
+                await log_jwt_manipulation_attempt(
+                    lab_instance_id=str(user.lab_instance_id),
+                    provided_role=claimed_role,
+                    source_ip=connection.client.host if connection and connection.client else "unknown",
+                    user_id=str(user.id),
+                    blocked=blocked,
+                )
+
         if session.jwt_filter_enabled:
-            payload = jwt.decode(
-                token,
-                SECRET_KEY,
-                algorithms=[ALGORITHM],
-                options={"require": ["exp", "sub", "id", "lab_instance_id"]},
-            )
-            if payload.get("role") != user.role:
-                raise ValueError("Invalid token role")
+            try:
+                payload = jwt.decode(
+                    token,
+                    SECRET_KEY,
+                    algorithms=[ALGORITHM],
+                    options={"require": ["exp", "sub", "id", "lab_instance_id"]},
+                )
+                if payload.get("role") != user.role:
+                    raise ValueError("Invalid token role")
+            except (jwt.InvalidTokenError, ValueError):
+                await log_forgery(blocked=True)
+                raise
+        else:
+            await log_forgery(blocked=False)
         return {
             "sub": user.username,
             "id": str(user.id),

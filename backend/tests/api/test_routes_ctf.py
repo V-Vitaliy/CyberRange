@@ -10,10 +10,12 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import httpx
+import jwt
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
+from app.auth import service as auth_service
 from app.auth.service import create_access_token
 from app.ctf import service as ctf_service
 from app.ctf.repository import CtfRepository
@@ -155,3 +157,21 @@ async def test_repository_normalizes_uuid_and_requires_both_hash_and_lab(ctf):
         assert found.id == flag_id
     assert await CtfRepository.get_flag_by_value(ctf.db, flag_hash("foreign-only-test-flag"), ctf.labs[0]) is None
     assert await CtfRepository.get_flag_by_value(ctf.db, flag_hash("unknown-test-flag"), ctf.labs[1]) is None
+
+
+@pytest.mark.asyncio
+async def test_forged_role_on_http_request_is_logged_with_client_ip(ctf, monkeypatch):
+    forgery_log = AsyncMock()
+    monkeypatch.setattr(auth_service, "log_jwt_manipulation_attempt", forgery_log, raising=False)
+    payload = jwt.decode(ctf.tokens[0], options={"verify_signature": False})
+    payload["role"] = "admin"
+    forged = jwt.encode(payload, None, algorithm="none")
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/api/red/ctf/submit", headers={"Authorization": f"Bearer {forged}"}, json={"flag_value": "x"}
+        )
+    assert response.status_code == 400  # Forgery passes without JWT Strict Mode; the flag is wrong.
+    forgery_log.assert_awaited_once()
+    assert forgery_log.await_args.kwargs["lab_instance_id"] == str(ctf.labs[0])
+    assert forgery_log.await_args.kwargs["provided_role"] == "admin"
+    assert forgery_log.await_args.kwargs["source_ip"] == "127.0.0.1"

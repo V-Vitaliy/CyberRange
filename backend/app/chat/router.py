@@ -40,7 +40,6 @@ async def chat_ask(
 
     # Log the LLM Prompt
     await log_security_event(
-        db=db,
         lab_instance_id=lab_id,
         event_type="LLM_PROMPT",
         payload={"username": user.get("sub"), "claimed_role": user.get("role"), "prompt": chat_req.prompt},
@@ -76,7 +75,6 @@ async def search_chat_history(
 
     # Log the potential SQLi query
     await log_security_event(
-        db=db,
         lab_instance_id=lab_id,
         event_type="DB_QUERY",
         payload={"query_param": q, "target": "chat_history"},
@@ -89,7 +87,6 @@ async def search_chat_history(
     except (HistoryQueryError, IsolationError) as e:
         # Search owns a separate transaction; this session remains usable for SIEM.
         await log_security_event(
-            db=db,
             lab_instance_id=lab_id,
             event_type="SQL_ERROR",
             payload={"error": str(e), "failed_query": q},

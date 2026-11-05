@@ -7,60 +7,85 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.redis_client import redis_client
+from app.db.database import async_session
 from app.db.models import GameSession, SecurityAuditLog
 from app.siem.repository import AuditLogRepository
 from app.siem.schemas import DashboardStatsResponse
 
 logger = logging.getLogger(__name__)
 
+# One AUTH_BYPASS_ATTEMPT per user, claimed role and outcome per window (the default token lifetime).
+JWT_FORGERY_LOG_WINDOW_SECONDS = 15 * 60
+
 
 async def log_security_event(
-    db: AsyncSession, lab_instance_id: str, event_type: str, payload: Dict[str, Any], source_ip: str = "127.0.0.1"
+    lab_instance_id: str, event_type: str, payload: Dict[str, Any], source_ip: str = "127.0.0.1"
 ) -> Optional[SecurityAuditLog]:
     """
     Core SIEM logging function.
     Records Red Team actions (and system events) into the database
     so the Blue Team can monitor and investigate them.
+    The event is written in its own session: it never commits or rolls back the caller's transaction.
     """
-    try:
-        if "source_ip" not in payload:
-            payload["source_ip"] = source_ip
+    if "source_ip" not in payload:
+        payload["source_ip"] = source_ip
 
-        # Create a new audit log record
-        new_event = SecurityAuditLog(
-            lab_instance_id=lab_instance_id,
-            timestamp=datetime.utcnow(),
-            event_type=event_type,
-            payload=payload,
-        )
+    async with async_session() as db:
+        try:
+            # Create a new audit log record
+            new_event = SecurityAuditLog(
+                lab_instance_id=lab_instance_id,
+                timestamp=datetime.utcnow(),
+                event_type=event_type,
+                payload=payload,
+            )
 
-        db.add(new_event)
-        await db.commit()
-        await db.refresh(new_event)
+            db.add(new_event)
+            await db.commit()
+            await db.refresh(new_event)
 
-        return new_event
+            return new_event
 
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"SIEM Logger failed to record event '{event_type}': {str(e)}")
-        return None
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"SIEM Logger failed to record event '{event_type}': {str(e)}")
+            return None
 
 
-async def log_jwt_manipulation_attempt(db: AsyncSession, lab_instance_id: str, provided_role: str, source_ip: str):
+async def log_jwt_manipulation_attempt(
+    lab_instance_id: str, provided_role: str, source_ip: str, *, user_id: str, blocked: bool
+):
     """
     Helper function specifically for logging forged JWT usage.
+    Repeats within the window are dropped; if Redis is down, every attempt is logged.
     """
-    return await log_security_event(
-        db=db,
+    key = f"jwt_forgery:{lab_instance_id}:{user_id}:{provided_role}:{int(blocked)}"
+    try:
+        reserved = await redis_client.set(key, 1, nx=True, ex=JWT_FORGERY_LOG_WINDOW_SECONDS)
+        if not reserved:
+            return None
+    except Exception:
+        reserved = False
+        logger.warning("Forgery log de-duplication is unavailable; logging the attempt")
+    event = await log_security_event(
         lab_instance_id=lab_instance_id,
         event_type="AUTH_BYPASS_ATTEMPT",
         payload={
             "description": "Suspicious JWT payload detected.",
             "claimed_role": provided_role,
+            "blocked": blocked,
             "risk_level": "HIGH",
         },
         source_ip=source_ip,
     )
+    if event is None and reserved:
+        # The write failed: let the next attempt try again instead of hiding it for the window.
+        try:
+            await redis_client.delete(key)
+        except Exception:
+            logger.warning("Could not release the forgery log window after a failed write")
+    return event
 
 
 async def get_dashboard_stats(db: AsyncSession, game_session: GameSession) -> DashboardStatsResponse:

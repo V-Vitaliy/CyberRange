@@ -50,7 +50,6 @@ async def upload_document(
         rejection = (415, "Only PDF documents are accepted.")
     if rejection:
         await log_security_event(
-            db=db,
             lab_instance_id=user["lab_instance_id"],
             event_type="FILE_UPLOAD_REJECTED",
             payload={"filename": file.filename, "reason": rejection[1]},
@@ -79,7 +78,6 @@ async def upload_document(
         target = resolve_upload_target(user["lab_instance_id"], file.filename)
     except PathTraversalError:
         await log_security_event(
-            db=db,
             lab_instance_id=user.get("lab_instance_id"),
             event_type="FILE_UPLOAD_FAILED",
             payload={"filename": file.filename, "reason": "Path Traversal Blocked"},
@@ -89,7 +87,6 @@ async def upload_document(
 
     await store.put(target.key, content)
     await log_security_event(
-        db=db,
         lab_instance_id=user.get("lab_instance_id"),
         event_type="FILE_UPLOAD",
         payload={"filename": file.filename, "destination": target.key, "indexing": str(target.indexed).lower()},
@@ -123,7 +120,7 @@ async def etl_status_websocket(
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        user = await get_current_user_vulnerable(websocket.headers.get("authorization"), db)
+        user = await get_current_user_vulnerable(websocket.headers.get("authorization"), db, websocket)
     except HTTPException:
         await websocket.close(code=1008)
         return
