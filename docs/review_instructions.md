@@ -11,7 +11,7 @@ attacker's own lab** or removes them unintentionally.
 
 - **Prompt injection** in chat and in indexed documents; the model following
   instructions found in user input or retrieved context.
-- **SQL injection** in `GET /api/red/chat/history` (`db/sqli_search.py`): the
+- **SQL injection** in `GET /api/red/chat/history` (`chat/sqli_search.py`): the
   query string is concatenated on purpose and the SQLSTATE error text is
   returned on purpose. It must run only as the lab's read-only role against the
   lab's `security_barrier` views.

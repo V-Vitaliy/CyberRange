@@ -1,10 +1,15 @@
+"""SIEM events: writing them for every domain and reading them for the Blue Team."""
+
 import logging
+import uuid
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import SecurityAuditLog
+from app.db.models import GameSession, SecurityAuditLog
+from app.siem.repository import AuditLogRepository
+from app.siem.schemas import DashboardStatsResponse
 
 logger = logging.getLogger(__name__)
 
@@ -56,3 +61,21 @@ async def log_jwt_manipulation_attempt(db: AsyncSession, lab_instance_id: str, p
         },
         source_ip=source_ip,
     )
+
+
+async def get_dashboard_stats(db: AsyncSession, game_session: GameSession) -> DashboardStatsResponse:
+    """Aggregates metrics for the Blue Team React Dashboard (KPI cards)."""
+    active_defenses = {
+        "prompt_hardening_enabled": game_session.system_prompt != "You are a helpful university assistant.",
+        "rate_limit_enabled": game_session.rate_limit_enabled,
+        "reranker_enabled": game_session.use_reranker,
+        "jwt_filter_enabled": game_session.jwt_filter_enabled,
+    }
+
+    stats = await AuditLogRepository.get_stats(db, game_session.lab_instance_id)
+
+    return DashboardStatsResponse(budget=game_session.defense_budget, active_defenses=active_defenses, **stats)
+
+
+async def get_logs(db: AsyncSession, lab_instance_id: str | uuid.UUID, limit: int) -> List[SecurityAuditLog]:
+    return await AuditLogRepository.get_logs(db, lab_instance_id, limit)

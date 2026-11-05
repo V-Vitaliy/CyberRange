@@ -33,7 +33,7 @@ class PostgresSocWorkerTests(unittest.IsolatedAsyncioTestCase):
         from app.db.database import Base
         from app.db.database import engine as app_engine
         from app.db.models import GameSession, SecurityAuditLog
-        from app.services import soc_worker
+        from app.siem import soc_worker
 
         url = make_url(TEST_URL)
         self.assertEqual(url.database, TEST_NAME, "Explicit database confirmation mismatch")

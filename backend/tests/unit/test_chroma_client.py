@@ -4,7 +4,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from app.db import chroma_client
+from app.documents import chroma_client
 
 
 @pytest.fixture

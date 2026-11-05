@@ -8,7 +8,31 @@ import pytest
 APP = Path(__file__).resolve().parents[2] / "app"
 
 # Domains already moved into app/<domain>/ (ARC-3); their repositories are private.
-MIGRATED_DOMAINS = {"auth": ["UserRepository"], "ctf": ["CtfRepository"], "labs": ["GameSessionRepository"]}
+MIGRATED_DOMAINS = {
+    "auth": ["UserRepository"],
+    "chat": ["ChatRepository"],
+    "ctf": ["CtfRepository"],
+    "defense": [],
+    "documents": [],
+    "labs": ["GameSessionRepository"],
+    "siem": ["AuditLogRepository"],
+}
+
+# Route path -> the domain whose router.py must declare it.
+ROUTE_OWNERS = {
+    "/login": "auth",
+    "/submit": "ctf",
+    "/defenses/buy": "defense",
+    "/me": "auth",
+    "/investigate": "siem",
+    "/dashboard": "siem",
+    "/logs": "siem",
+    "/chat/ask": "chat",
+    "/chat/history": "chat",
+    "/upload": "documents",
+    "/ws/etl-status/{task_id}": "documents",
+}
+ROUTE_DECORATORS = {"get", "post", "put", "patch", "delete", "websocket"}
 
 
 def _modules():
@@ -62,7 +86,7 @@ def test_moved_repository_classes_are_not_referenced_outside_their_domain(domain
 
 
 def test_routers_do_not_import_domain_repositories():
-    routers = [(path, tree) for path, tree in _modules() if path.parts[0] == "api" or path.name == "router.py"]
+    routers = [(path, tree) for path, tree in _modules() if path.name == "router.py"]
     offenders = [
         f"{path}: imports {module}"
         for path, tree in routers
@@ -75,8 +99,9 @@ def test_routers_do_not_import_domain_repositories():
 @pytest.mark.parametrize("domain", sorted(MIGRATED_DOMAINS))
 def test_migrated_domain_package_exists(domain):
     assert (APP / domain / "__init__.py").is_file()
-    assert (APP / domain / "repository.py").is_file()
     assert (APP / domain / "service.py").is_file()
+    if MIGRATED_DOMAINS[domain]:
+        assert (APP / domain / "repository.py").is_file()
 
 
 def test_core_imports_no_repository():
@@ -90,17 +115,27 @@ def test_core_imports_no_repository():
     assert offenders == [], "\n".join(offenders)
 
 
-def test_login_routes_are_defined_only_in_auth():
-    offenders = [
-        f"{path}:{node.lineno}"
-        for path, tree in _modules()
-        if path.parts[0] != "auth"
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "post"
-        and node.args
-        and isinstance(node.args[0], ast.Constant)
-        and node.args[0].value == "/login"
-    ]
-    assert offenders == [], "\n".join(offenders)
+def _route_declarations():
+    for path, tree in _modules():
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in ROUTE_DECORATORS
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+            ):
+                yield path, node.lineno, node.args[0].value
+
+
+@pytest.mark.parametrize("route", sorted(ROUTE_OWNERS))
+def test_routes_are_declared_in_their_domain_router(route):
+    owner = Path(ROUTE_OWNERS[route]) / "router.py"
+    found = [(path, line) for path, line, value in _route_declarations() if value == route]
+    assert found, f"{route} is not declared anywhere"
+    assert [f"{path}:{line}" for path, line in found if path != owner] == []
+
+
+@pytest.mark.parametrize("legacy", ["api", "services", "schemas", "db/repository.py"])
+def test_pre_domain_layers_are_gone(legacy):
+    assert not (APP / legacy).exists(), f"{legacy} should have been split into domain packages"

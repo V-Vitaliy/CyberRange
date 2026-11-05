@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict
 from app.agents.tools import registry
 from app.agents.tools.base import AgentTool, ToolResult
 from app.agents.tools.email_tool import send_email
-from app.core import llm_engine
+from app.chat import llm_engine
 
 
 class TicketArguments(BaseModel):

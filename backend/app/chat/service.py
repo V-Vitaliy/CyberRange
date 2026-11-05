@@ -6,11 +6,11 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.llm_engine import generate_unified_stream
-from app.core.prompt_builder import PromptBuilder
+from app.chat.llm_engine import generate_unified_stream
+from app.chat.prompt_builder import PromptBuilder
+from app.chat.repository import ChatRepository
 from app.core.queue_manager import LLMQueueManager
-from app.db.chroma_client import VectorStore
-from app.db.repository import ChatRepository
+from app.documents.chroma_client import VectorStore
 from app.labs.service import get_authorized_session
 
 logger = logging.getLogger(__name__)
@@ -18,6 +18,16 @@ logger = logging.getLogger(__name__)
 CHAT_ERROR_MESSAGE = "The assistant could not answer. Please try again."
 
 _reranker = None
+
+
+async def get_or_create_thread(db: AsyncSession, thread_id, user_id, session_id, initial_prompt: str):
+    """Return the caller's thread, creating it on first use; a foreign thread is a 404."""
+    return await ChatRepository.get_or_create_thread(db, thread_id, user_id, session_id, initial_prompt)
+
+
+async def search_chat_history(lab_id, session_id, query):
+    """Intentionally injectable history search, run by the lab's isolated reader."""
+    return await ChatRepository.search_chat_history_vulnerable(lab_id, session_id, query)
 
 
 def get_reranker():

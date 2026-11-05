@@ -1,10 +1,17 @@
+"""Defense shop for the Blue Team and the rate limit it can switch on."""
+
+import logging
 from uuid import UUID
 
 from fastapi import HTTPException
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.defense.schemas import BuyDefenseResponse
 from app.labs.service import get_session
-from app.schemas.blue_team import BuyDefenseResponse
+from app.siem.service import log_security_event
+
+logger = logging.getLogger(__name__)
 
 # Pricing catalog for defense mechanisms (according to specification)
 DEFENSE_PRICING = {
@@ -78,3 +85,40 @@ async def process_defense_purchase(db: AsyncSession, session_id: UUID, defense_t
             "jwt_filter_enabled": game_session.jwt_filter_enabled,
         },
     )
+
+
+async def enforce_rate_limit(db: AsyncSession, redis: Redis, session_id: UUID, client_ip: str) -> None:
+    session = await get_session(db, session_id)
+
+    if not session or not session.rate_limit_enabled:
+        logger.debug("Rate limit disabled or session %s not found", session_id)
+        return
+
+    redis_key = f"rate_limit:{session_id}:{client_ip}"
+
+    current_requests = await redis.incr(redis_key)
+
+    logger.debug("IP %s has %s requests; limit %s", client_ip, current_requests, session.rate_limit_rpm)
+
+    if current_requests == 1:
+        await redis.expire(redis_key, 60)
+
+    if current_requests > session.rate_limit_rpm:
+        logger.warning("Rate limit exceeded for IP %s in session %s", client_ip, session_id)
+
+        # Log the DoS attempt into SIEM
+        await log_security_event(
+            db=db,
+            lab_instance_id=str(session.lab_instance_id),
+            event_type="DOS_ATTEMPT_BLOCKED",
+            payload={
+                "current_requests": current_requests,
+                "limit": session.rate_limit_rpm,
+                "description": "Rate limit exceeded. Potential DoS or Sponge Bomb attack.",
+            },
+            source_ip=client_ip,
+        )
+
+        raise HTTPException(
+            status_code=429, detail="Too Many Requests. The Blue Team's Active WAF has temporarily blocked your IP."
+        )

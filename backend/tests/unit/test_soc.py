@@ -12,7 +12,7 @@ from pydantic import ValidationError
 from app.agents.soc_agent import AnalysisOutput, analyze_security_log, create_soc_graph
 from app.core.queue_manager import LLMQueueManager
 from app.db.models import SecurityAuditLog
-from app.services import soc_worker
+from app.siem import soc_worker
 from tests.openai_doubles import assert_request, make_model
 
 

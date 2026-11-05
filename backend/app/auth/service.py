@@ -13,8 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.repository import UserRepository
 from app.core.config import settings
 from app.db.database import get_db
+from app.db.ids import ensure_uuid
 from app.db.models import User
-from app.db.repository import ensure_uuid
 from app.labs.service import get_session_for_lab
 
 

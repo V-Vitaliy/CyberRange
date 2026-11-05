@@ -7,10 +7,11 @@ from uuid import uuid4
 import pytest
 from langchain_core.messages import AIMessageChunk
 
+from app.chat import service as rag_service
+from app.chat import sqli_search
+from app.chat.repository import ChatRepository
 from app.core.queue_manager import LLMQueueManager
 from app.db.models import GameSession
-from app.db.repository import ChatRepository
-from app.services import rag_service
 
 
 @pytest.mark.asyncio
@@ -83,9 +84,9 @@ async def test_reranker_switch_and_system_prompt_reach_generation(monkeypatch, e
 
 @pytest.mark.asyncio
 async def test_chat_sse_records_simulated_tool_result_and_history(harness, monkeypatch):
+    from app.chat import service as rag_service
+    from app.chat.repository import ChatRepository
     from app.core.queue_manager import LLMQueueManager
-    from app.db.repository import ChatRepository
-    from app.services import rag_service
 
     audit, delivery = harness
     lab_id = uuid4()
@@ -127,9 +128,9 @@ async def test_chat_sse_records_simulated_tool_result_and_history(harness, monke
 @pytest.mark.asyncio
 @pytest.mark.parametrize("finish_reason", ["stop", "length"])
 async def test_empty_chat_emits_sse_error_without_saving_success(harness, monkeypatch, finish_reason):
+    from app.chat import service as rag_service
+    from app.chat.repository import ChatRepository
     from app.core.queue_manager import LLMQueueManager
-    from app.db.repository import ChatRepository
-    from app.services import rag_service
 
     lab_id = uuid4()
     session = SimpleNamespace(lab_instance_id=lab_id, use_reranker=False, system_prompt="test")
@@ -250,3 +251,22 @@ async def test_reranker_loading_and_scoring_run_off_the_event_loop(monkeypatch):
     assert parts[-1] == "data: [DONE]\n\n"
     assert threading.get_ident() not in (threads.get("load"), threads.get("predict"))
     assert set(threads) == {"load", "predict"}
+
+
+@pytest.mark.asyncio
+async def test_history_search_goes_to_the_isolated_lab_reader(monkeypatch):
+    found = ([{"title": "t"}], "SELECT ...")
+    search = AsyncMock(return_value=found)
+    monkeypatch.setattr(sqli_search, "search_history", search)
+    assert await rag_service.search_chat_history("lab", "session", "query") is found
+    search.assert_awaited_once_with("lab", "session", "query")
+
+
+@pytest.mark.asyncio
+async def test_thread_lookup_checks_owner_and_session(monkeypatch):
+    thread = object()
+    lookup = AsyncMock(return_value=thread)
+    monkeypatch.setattr(ChatRepository, "get_or_create_thread", lookup)
+    db = object()
+    assert await rag_service.get_or_create_thread(db, "thread", "user", "session", "prompt") is thread
+    lookup.assert_awaited_once_with(db, "thread", "user", "session", "prompt")

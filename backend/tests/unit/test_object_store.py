@@ -6,8 +6,8 @@ from uuid import uuid4
 
 import pytest
 
-from app.db import object_store
-from app.db.object_store import ObjectStore, PathTraversalError, resolve_upload_target
+from app.documents import object_store
+from app.documents.object_store import ObjectStore, PathTraversalError, resolve_upload_target
 
 LAB = str(uuid4())
 

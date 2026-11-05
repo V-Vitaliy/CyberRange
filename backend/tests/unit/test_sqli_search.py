@@ -6,8 +6,8 @@ from uuid import uuid4
 
 import pytest
 
-from app.db import sqli_search
-from app.db.sqli_isolation import IsolationError, LabObjects
+from app.chat import sqli_search
+from app.chat.sqli_isolation import IsolationError, LabObjects
 
 
 @pytest.mark.parametrize("problem", ["missing", "malformed", "foreign_lab", "admin", "other_db", "other_host"])
