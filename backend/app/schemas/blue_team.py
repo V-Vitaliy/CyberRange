@@ -5,16 +5,6 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 
-class LoginRequest(BaseModel):
-    username: str
-    password: str
-
-
-class TokenResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-
-
 class InvestigateRequest(BaseModel):
     log_id: UUID
     is_malicious: bool

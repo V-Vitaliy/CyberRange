@@ -5,7 +5,7 @@ from uuid import uuid4
 import httpx
 import pytest
 
-from app.core.security import get_blue_team_user, get_current_user_secure
+from app.auth.service import get_blue_team_user, get_current_user_secure
 from app.db.database import get_db
 from app.labs.repository import GameSessionRepository
 from app.main import app, blue_app

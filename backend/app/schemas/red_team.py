@@ -13,8 +13,3 @@ class ChatRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=settings.PROMPT_MAX_CHARS)
     session_id: str
     thread_id: uuid.UUID
-
-
-class LoginRequest(BaseModel):
-    username: str
-    password: str

@@ -15,7 +15,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from app.api import routes_ctf
-from app.core.security import create_access_token
+from app.auth.service import create_access_token
 from app.db.database import get_db
 from app.db.models import CtfFlag, CtfSubmission, GameSession, User
 from app.db.repository import CtfRepository
