@@ -123,7 +123,7 @@ async def etl_status_websocket(
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        user = await get_current_user_vulnerable(websocket.headers.get("authorization"), db)
+        user = await get_current_user_vulnerable(websocket.headers.get("authorization"), db, websocket)
     except HTTPException:
         await websocket.close(code=1008)
         return

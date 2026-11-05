@@ -19,8 +19,24 @@ def identity(monkeypatch):
     session = SimpleNamespace(jwt_filter_enabled=False, lab_instance_id=user.lab_instance_id)
     monkeypatch.setattr(UserRepository, "get_by_id", AsyncMock(return_value=user))
     monkeypatch.setattr(GameSessionRepository, "get_by_lab_instance_id", AsyncMock(return_value=session))
+    # The SIEM writer is replaced for every identity test; forgery_log exposes it.
+    monkeypatch.setattr(service, "log_jwt_manipulation_attempt", AsyncMock(), raising=False)
     claims = dict(sub=user.username, id=str(user.id), role=user.role, lab_instance_id=str(user.lab_instance_id))
     return user, session, claims
+
+
+@pytest.fixture
+def forgery_log(identity):
+    return service.log_jwt_manipulation_attempt
+
+
+def forge_role(token, role="admin"):
+    payload = jwt.decode(token, options={"verify_signature": False})
+    payload["role"] = role
+    return jwt.encode(payload, None, algorithm="none")
+
+
+CLIENT = SimpleNamespace(client=SimpleNamespace(host="203.0.113.9"))
 
 
 @pytest.mark.asyncio
@@ -155,3 +171,54 @@ def test_auth_routers_hold_login_and_blue_profile():
 
     assert [(route.path, route.methods) for route in red_router.routes] == [("/login", {"POST"})]
     assert [(route.path, route.methods) for route in blue_router.routes] == [("/login", {"POST"}), ("/me", {"GET"})]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("protected", [False, True])
+async def test_role_forgery_is_logged_with_claimed_role_and_source_ip(identity, forgery_log, protected):
+    user, session, claims = identity
+    session.jwt_filter_enabled = protected
+    forged = forge_role(service.create_access_token(claims))
+    db = object()
+    if protected:
+        with pytest.raises(HTTPException) as exc:
+            await service.get_current_user_vulnerable(f"Bearer {forged}", db, CLIENT)
+        assert exc.value.status_code == 401
+    else:
+        assert (await service.get_current_user_vulnerable(f"Bearer {forged}", db, CLIENT))["role"] == "admin"
+    forgery_log.assert_awaited_once_with(
+        db=db,
+        lab_instance_id=str(user.lab_instance_id),
+        provided_role="admin",
+        source_ip="203.0.113.9",
+        user_id=str(user.id),
+        blocked=protected,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("protected", [False, True])
+async def test_genuine_token_logs_no_forgery(identity, forgery_log, protected):
+    _, session, claims = identity
+    session.jwt_filter_enabled = protected
+    await service.get_current_user_vulnerable(f"Bearer {service.create_access_token(claims)}", object(), CLIENT)
+    forgery_log.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("key,value", [("sub", "another-user"), ("lab_instance_id", str(uuid4()))])
+async def test_rejected_identity_forgery_writes_no_role_event(identity, forgery_log, key, value):
+    _, _, claims = identity
+    payload = jwt.decode(service.create_access_token(claims), options={"verify_signature": False})
+    payload.update({key: value, "role": "admin"})
+    with pytest.raises(HTTPException):
+        await service.get_current_user_vulnerable(f"Bearer {jwt.encode(payload, None, algorithm='none')}", object())
+    forgery_log.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_forgery_without_connection_logs_unknown_source(identity, forgery_log):
+    user, _, claims = identity
+    forged = forge_role(service.create_access_token(claims))
+    await service.get_current_user_vulnerable(f"Bearer {forged}", object())
+    assert forgery_log.await_args.kwargs["source_ip"] == "unknown"
