@@ -9,9 +9,9 @@ from app.chat.sqli_isolation import IsolationError
 from app.chat.sqli_search import HistoryQueryError
 from app.core.queue_manager import LLMQueueManager, get_queue_manager
 from app.core.redis_client import get_redis
-from app.db.chroma_client import VectorStore, get_vector_store
 from app.db.database import get_db
 from app.defense.service import enforce_rate_limit
+from app.documents.chroma_client import VectorStore, get_vector_store
 from app.labs.service import get_authorized_session
 from app.llm.provider import get_llm_instance
 from app.siem.service import log_security_event

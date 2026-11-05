@@ -4,8 +4,8 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from app.db.ids import ensure_uuid
 from app.db.models import GameSession
-from app.db.repository import ensure_uuid
 
 
 class GameSessionRepository:

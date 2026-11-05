@@ -13,6 +13,7 @@ MIGRATED_DOMAINS = {
     "chat": ["ChatRepository"],
     "ctf": ["CtfRepository"],
     "defense": [],
+    "documents": [],
     "labs": ["GameSessionRepository"],
     "siem": ["AuditLogRepository"],
 }
@@ -28,6 +29,8 @@ ROUTE_OWNERS = {
     "/logs": "siem",
     "/chat/ask": "chat",
     "/chat/history": "chat",
+    "/upload": "documents",
+    "/ws/etl-status/{task_id}": "documents",
 }
 ROUTE_DECORATORS = {"get", "post", "put", "patch", "delete", "websocket"}
 
@@ -83,7 +86,7 @@ def test_moved_repository_classes_are_not_referenced_outside_their_domain(domain
 
 
 def test_routers_do_not_import_domain_repositories():
-    routers = [(path, tree) for path, tree in _modules() if path.parts[0] == "api" or path.name == "router.py"]
+    routers = [(path, tree) for path, tree in _modules() if path.name == "router.py"]
     offenders = [
         f"{path}: imports {module}"
         for path, tree in routers
@@ -131,3 +134,8 @@ def test_routes_are_declared_in_their_domain_router(route):
     found = [(path, line) for path, line, value in _route_declarations() if value == route]
     assert found, f"{route} is not declared anywhere"
     assert [f"{path}:{line}" for path, line in found if path != owner] == []
+
+
+@pytest.mark.parametrize("legacy", ["api", "services", "schemas", "db/repository.py"])
+def test_pre_domain_layers_are_gone(legacy):
+    assert not (APP / legacy).exists(), f"{legacy} should have been split into domain packages"

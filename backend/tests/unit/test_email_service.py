@@ -2,12 +2,12 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 
-from app.services import email_service
-from app.services.email_service import EmailService
+from app.agents.tools import email_service
+from app.agents.tools.email_service import EmailService
 
 
 def test_email_mock_cannot_connect_to_smtp(monkeypatch):
-    from app.services import email_service
+    from app.agents.tools import email_service
 
     monkeypatch.setattr(email_service.settings, "SMTP_HOST", "")
     smtp = Mock(side_effect=AssertionError("Real SMTP must not be contacted"))

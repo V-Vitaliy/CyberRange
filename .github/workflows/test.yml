@@ -145,7 +145,7 @@ jobs:
           python -m pip install -q pydantic-settings
           python - <<'PY'
           import json, urllib.request
-          from app.services.email_service import EmailService
+          from app.agents.tools.email_service import EmailService
           assert EmailService.recipient_allowed("student@lab.local")
           assert not EmailService.recipient_allowed("attacker@example.com")
           assert EmailService.send_real_email("student@lab.local", "CI sink check", "hello")
@@ -185,7 +185,7 @@ jobs:
           import boto3
           from botocore import UNSIGNED
           from botocore.config import Config
-          from app.db.object_store import ObjectStore, resolve_upload_target
+          from app.documents.object_store import ObjectStore, resolve_upload_target
 
           store = ObjectStore.from_settings()
           key = resolve_upload_target("00000000-0000-0000-0000-000000000001", "../student_uploads/ci.pdf").key

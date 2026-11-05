@@ -8,7 +8,7 @@ from uuid import uuid4
 import pytest
 
 from app.core.config import settings
-from app.services import etl_worker
+from app.documents import service as etl_worker
 
 
 @pytest.mark.asyncio
