@@ -1,3 +1,6 @@
+"""Passwords, JWT tokens and the FastAPI dependencies that authenticate users."""
+
+import asyncio
 import hashlib
 from datetime import datetime, timedelta, timezone
 
@@ -7,10 +10,11 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.repository import UserRepository
 from app.core.config import settings
 from app.db.database import get_db
 from app.db.models import User
-from app.db.repository import UserRepository, ensure_uuid
+from app.db.repository import ensure_uuid
 from app.labs.service import get_session_for_lab
 
 
@@ -33,11 +37,6 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verifies the password directly via bcrypt."""
     password_bytes = _pre_hash(plain_password)
     return bcrypt.checkpw(password_bytes, hashed_password.encode("utf-8"))
-
-
-def hash_ctf_flag(flag_value: str) -> str:
-    """Hashes a CTF flag value using SHA-256 for secure database storage and comparison."""
-    return hashlib.sha256(flag_value.encode("utf-8")).hexdigest()
 
 
 # ---------------------------------------------------------
@@ -172,3 +171,11 @@ async def get_current_user_vulnerable(
         }
     except (jwt.InvalidTokenError, ValueError, TypeError, KeyError, AttributeError) as exc:
         raise HTTPException(status_code=401, detail="Invalid token; please re-login") from exc
+
+
+async def authenticate(db: AsyncSession, username: str, password: str) -> User | None:
+    """Return the user when the password matches; bcrypt runs off the event loop."""
+    user = await UserRepository.get_by_username(db, username)
+    if not user or not await asyncio.to_thread(verify_password, password, user.password_hash):
+        return None
+    return user

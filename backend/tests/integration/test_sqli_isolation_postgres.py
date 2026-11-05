@@ -202,7 +202,7 @@ class PostgresIsolationTests(unittest.IsolatedAsyncioTestCase):
 
             import httpx
 
-            from app.core.security import create_access_token
+            from app.auth.service import create_access_token
             from app.main import app, red_app
 
             self.assertFalse(red_app.dependency_overrides)

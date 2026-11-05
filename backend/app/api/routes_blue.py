@@ -1,14 +1,12 @@
-import asyncio
-from datetime import timedelta
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import create_access_token, get_blue_team_user, verify_password
+from app.auth.service import get_blue_team_user
 from app.db.database import get_db
 from app.db.models import User
-from app.db.repository import AuditLogRepository, UserRepository
+from app.db.repository import AuditLogRepository
 from app.labs.service import get_authorized_session, get_session_for_lab
 from app.schemas.blue_team import (
     AuditLogEntry,
@@ -17,36 +15,11 @@ from app.schemas.blue_team import (
     DashboardStatsResponse,
     InvestigateRequest,
     InvestigateResponse,
-    LoginRequest,
-    TokenResponse,
 )
 from app.services.defense import process_defense_purchase
 from app.services.forensics import process_investigation
 
 router = APIRouter()
-
-
-@router.post("/login", response_model=TokenResponse, tags=["Blue Team - User"])
-async def login_blue_team(login_data: LoginRequest, db: AsyncSession = Depends(get_db)):
-    """Authenticates a Blue Team user and returns a signed JWT."""
-    user = await UserRepository.get_by_username(db, login_data.username)
-
-    if not user or not await asyncio.to_thread(verify_password, login_data.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Incorrect username or password")
-
-    if user.role not in ["blue_team", "admin"]:
-        raise HTTPException(status_code=403, detail="Not authorized to access Blue Team panel")
-
-    token_data = {
-        "sub": user.username,
-        "id": str(user.id),
-        "role": user.role,
-        "lab_instance_id": str(user.lab_instance_id),
-    }
-
-    access_token = create_access_token(data=token_data, expires_delta=timedelta(minutes=60))
-
-    return {"access_token": access_token, "token_type": "bearer"}
 
 
 @router.get("/me", tags=["Blue Team - User"])

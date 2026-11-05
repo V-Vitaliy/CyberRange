@@ -34,7 +34,7 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
         from sqlalchemy.exc import DBAPIError
         from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-        from app.core.security import get_password_hash, verify_password
+        from app.auth.service import get_password_hash, verify_password
         from app.db.database import Base
         from app.db.database import engine as app_engine
         from app.db.models import ChatThread, GameSession, SecurityAuditLog, User
