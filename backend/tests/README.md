@@ -3,7 +3,7 @@
 Tests are grouped by the module they verify. Add new tests to the existing file
 of that module instead of creating a file per task.
 
-- `unit/test_<module>.py`: one file per application module (`config`, `security`,
+- `unit/test_<module>.py`: one file per application module (`config`, `auth`, `labs`,
   `llm_engine`, `rag_service`, `soc`, `defense`, ...). `unit/test_admin_setup.py`
   covers `scripts/admin_setup.py` with doubles and can also run with standard-library
   `unittest` and no backend dependencies.
