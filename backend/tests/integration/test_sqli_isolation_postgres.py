@@ -30,16 +30,16 @@ class PostgresIsolationTests(unittest.IsolatedAsyncioTestCase):
         from sqlalchemy.exc import DBAPIError
         from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-        from app.core.config import settings
-        from app.db.database import Base
-        from app.db.database import engine as app_engine
-        from app.db.models import ChatThread, GameSession, SecurityAuditLog, User
-        from app.db.sqli_isolation import (
+        from app.chat.sqli_isolation import (
             IsolationError,
             LabObjects,
             check_reader_boundary,
             provision_lab,
         )
+        from app.core.config import settings
+        from app.db.database import Base
+        from app.db.database import engine as app_engine
+        from app.db.models import ChatThread, GameSession, SecurityAuditLog, User
 
         asyncio.get_running_loop().set_debug(False)
         url = make_url(TEST_URL)

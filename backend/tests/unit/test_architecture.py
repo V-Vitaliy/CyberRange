@@ -10,6 +10,7 @@ APP = Path(__file__).resolve().parents[2] / "app"
 # Domains already moved into app/<domain>/ (ARC-3); their repositories are private.
 MIGRATED_DOMAINS = {
     "auth": ["UserRepository"],
+    "chat": ["ChatRepository"],
     "ctf": ["CtfRepository"],
     "defense": [],
     "labs": ["GameSessionRepository"],
@@ -25,6 +26,8 @@ ROUTE_OWNERS = {
     "/investigate": "siem",
     "/dashboard": "siem",
     "/logs": "siem",
+    "/chat/ask": "chat",
+    "/chat/history": "chat",
 }
 ROUTE_DECORATORS = {"get", "post", "put", "patch", "delete", "websocket"}
 
