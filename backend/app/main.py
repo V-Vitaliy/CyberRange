@@ -8,12 +8,12 @@ from fastapi.responses import JSONResponse
 
 from app.agents.soc_agent import create_soc_graph
 from app.api.routes_blue import router as blue_router
-from app.api.routes_ctf import router as ctf_router
 from app.api.routes_red import router as red_router
 from app.auth.router import blue_router as blue_auth_router
 from app.auth.router import red_router as red_auth_router
 from app.core.config import require_strong_jwt_secret, settings
 from app.core.queue_manager import LLMQueueManager
+from app.ctf.router import router as ctf_router
 from app.db.chroma_client import VectorStore
 from app.db.object_store import ObjectStore
 from app.llm.provider import create_llm

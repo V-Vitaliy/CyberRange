@@ -8,7 +8,7 @@ import pytest
 APP = Path(__file__).resolve().parents[2] / "app"
 
 # Domains already moved into app/<domain>/ (ARC-3); their repositories are private.
-MIGRATED_DOMAINS = {"auth": ["UserRepository"], "labs": ["GameSessionRepository"]}
+MIGRATED_DOMAINS = {"auth": ["UserRepository"], "ctf": ["CtfRepository"], "labs": ["GameSessionRepository"]}
 
 
 def _modules():
