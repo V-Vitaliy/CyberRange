@@ -110,7 +110,7 @@ async def test_malformed_or_unscoped_token_requires_relogin(identity, token):
 
 @pytest.mark.asyncio
 async def test_buying_jwt_defense_blocks_previously_accepted_forgery(identity, monkeypatch):
-    from app.services import defense
+    from app.defense import service as defense
 
     _, session, claims = identity
     session.defense_budget = 5
