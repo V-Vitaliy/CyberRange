@@ -166,7 +166,6 @@ async def get_current_user_vulnerable(
         async def log_forgery(blocked):
             if claimed_role != user.role:
                 await log_jwt_manipulation_attempt(
-                    db=db,
                     lab_instance_id=str(user.lab_instance_id),
                     provided_role=claimed_role,
                     source_ip=connection.client.host if connection and connection.client else "unknown",

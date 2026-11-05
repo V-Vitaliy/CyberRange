@@ -36,7 +36,6 @@ async def submit_flag(db: AsyncSession, user: dict, flag_value: str) -> dict:
 
     if not flag:
         await log_security_event(
-            db=db,
             lab_instance_id=lab_instance_id,
             event_type="CTF_SUBMIT_FAILED",
             payload={"attempted_flag": flag_value},
@@ -52,7 +51,6 @@ async def submit_flag(db: AsyncSession, user: dict, flag_value: str) -> dict:
     await CtfRepository.submit_flag(db, team_id=team_id, flag_id=flag.id, lab_instance_id=lab_instance_id)
 
     await log_security_event(
-        db=db,
         lab_instance_id=lab_instance_id,
         event_type="CTF_FLAG_CAPTURED",
         payload={"flag_id": flag.id, "reward": flag.reward, "submitted_by": user_id},

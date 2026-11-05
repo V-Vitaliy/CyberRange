@@ -37,7 +37,6 @@ async def red_team_login(login_req: LoginRequest, db: AsyncSession = Depends(get
 
     # Log successful login
     await log_security_event(
-        db=db,
         lab_instance_id=str(user.lab_instance_id),
         event_type="RED_TEAM_LOGIN",
         payload={"username": user.username, "status": "success"},

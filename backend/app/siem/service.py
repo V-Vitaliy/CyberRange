@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.redis_client import redis_client
+from app.db.database import async_session
 from app.db.models import GameSession, SecurityAuditLog
 from app.siem.repository import AuditLogRepository
 from app.siem.schemas import DashboardStatsResponse
@@ -19,39 +20,41 @@ JWT_FORGERY_LOG_WINDOW_SECONDS = 15 * 60
 
 
 async def log_security_event(
-    db: AsyncSession, lab_instance_id: str, event_type: str, payload: Dict[str, Any], source_ip: str = "127.0.0.1"
+    lab_instance_id: str, event_type: str, payload: Dict[str, Any], source_ip: str = "127.0.0.1"
 ) -> Optional[SecurityAuditLog]:
     """
     Core SIEM logging function.
     Records Red Team actions (and system events) into the database
     so the Blue Team can monitor and investigate them.
+    The event is written in its own session: it never commits or rolls back the caller's transaction.
     """
-    try:
-        if "source_ip" not in payload:
-            payload["source_ip"] = source_ip
+    if "source_ip" not in payload:
+        payload["source_ip"] = source_ip
 
-        # Create a new audit log record
-        new_event = SecurityAuditLog(
-            lab_instance_id=lab_instance_id,
-            timestamp=datetime.utcnow(),
-            event_type=event_type,
-            payload=payload,
-        )
+    async with async_session() as db:
+        try:
+            # Create a new audit log record
+            new_event = SecurityAuditLog(
+                lab_instance_id=lab_instance_id,
+                timestamp=datetime.utcnow(),
+                event_type=event_type,
+                payload=payload,
+            )
 
-        db.add(new_event)
-        await db.commit()
-        await db.refresh(new_event)
+            db.add(new_event)
+            await db.commit()
+            await db.refresh(new_event)
 
-        return new_event
+            return new_event
 
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"SIEM Logger failed to record event '{event_type}': {str(e)}")
-        return None
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"SIEM Logger failed to record event '{event_type}': {str(e)}")
+            return None
 
 
 async def log_jwt_manipulation_attempt(
-    db: AsyncSession, lab_instance_id: str, provided_role: str, source_ip: str, *, user_id: str, blocked: bool
+    lab_instance_id: str, provided_role: str, source_ip: str, *, user_id: str, blocked: bool
 ):
     """
     Helper function specifically for logging forged JWT usage.
@@ -66,7 +69,6 @@ async def log_jwt_manipulation_attempt(
         reserved = False
         logger.warning("Forgery log de-duplication is unavailable; logging the attempt")
     event = await log_security_event(
-        db=db,
         lab_instance_id=lab_instance_id,
         event_type="AUTH_BYPASS_ATTEMPT",
         payload={

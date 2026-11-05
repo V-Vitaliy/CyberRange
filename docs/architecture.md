@@ -77,7 +77,8 @@ Implemented in `auth/` (`service.py`, logins in `router.py`).
   indexed by a background ETL job; progress is in Redis and streamed over
   `/api/red/ws/etl-status/{task_id}`.
 - **SIEM**: `siem.service.log_security_event` writes lab-scoped events
-  to `security_audit_logs`. The Blue Team reads them; `siem/forensics.py`
+  to `security_audit_logs` in its own database session, so a failed write never
+  commits or rolls back the request's transaction. The Blue Team reads them; `siem/forensics.py`
   scores investigations.
 - **Auto-SOC** (`siem/soc_worker.py`): for solo labs, polls uninvestigated
   events, asks the LangGraph SOC agent (`agents/soc_agent.py`) for a structured
