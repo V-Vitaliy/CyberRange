@@ -79,7 +79,7 @@ Implemented in `auth/` (`service.py`, logins in `router.py`).
   events, asks the LangGraph SOC agent (`agents/soc_agent.py`) for a structured
   verdict and saves it in a short transaction. No transaction is open while the
   model runs. An unreachable model pauses analysis with backoff.
-- **Defenses** (`services/defense.py`): Blue Team spends points to enable
+- **Defenses** (`defense/service.py`): Blue Team spends points to enable
   per-session switches (system prompt patch, rate limiter, reranker, JWT strict
   mode).
 
@@ -104,17 +104,18 @@ Implemented in `auth/` (`service.py`, logins in `router.py`).
 | `core/` | `config.py` (settings), `llm_engine.py` (model streaming), `prompt_builder.py`, `queue_manager.py`, `redis_client.py` |
 | `llm/` | `provider.py`: model factory (OpenAI-compatible, Groq, local GGUF) |
 | `agents/` | `soc_agent.py` (LangGraph SOC analyst), `tools/` (tool registry: schema, risk level, audited handler; `send_email`) |
-| `services/` | `rag_service.py`, `etl_worker.py`, `soc_worker.py`, `forensics.py`, `defense.py`, `rate_limiter.py`, `email_service.py`, `siem_logger.py` |
+| `services/` | `rag_service.py`, `etl_worker.py`, `soc_worker.py`, `forensics.py`, `email_service.py`, `siem_logger.py` |
 | `db/` | `models.py`, `repository.py`, `database.py`, `chroma_client.py`, `object_store.py`, `sqli_isolation.py`, `sqli_search.py` |
 | `auth/` | Users and login: `repository.py` (`UserRepository`), `service.py` (passwords, JWT, `authenticate`, `get_current_user_secure`, `get_blue_team_user`, `get_current_user_vulnerable`), `router.py` (Red and Blue `POST /login`), `schemas.py` |
 | `ctf/` | Flag submission: `repository.py` (`CtfRepository`), `service.py` (`hash_ctf_flag`, `submit_flag`), `router.py` (`POST /api/red/ctf/submit`), `schemas.py` |
+| `defense/` | Defense shop and rate limit: `service.py` (`process_defense_purchase`, `enforce_rate_limit`), `router.py` (`POST /api/blue/defenses/buy`), `schemas.py` |
 | `labs/` | Game sessions: `repository.py` (`GameSessionRepository`), `service.py` (`get_session`, `get_session_for_lab`, `get_authorized_session`) |
 | `schemas/` | Pydantic request/response models |
 
 Dependencies point inward: routers → services → repositories. `core/` must not
 import domain repositories. Domain packages (`app/<domain>/` with router,
 service, repository and schemas as needed) are introduced step by step (ARC-3):
-`labs`, `auth` and `ctf` are migrated; `defense`, `siem`, `chat` and `documents`
+`labs`, `auth`, `ctf` and `defense` are migrated; `siem`, `chat` and `documents`
 follow. Other code uses a domain's `service`, never its `repository`; this is
 enforced by `backend/tests/unit/test_architecture.py`.
 

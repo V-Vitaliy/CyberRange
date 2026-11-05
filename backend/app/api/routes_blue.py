@@ -10,13 +10,10 @@ from app.db.repository import AuditLogRepository
 from app.labs.service import get_authorized_session, get_session_for_lab
 from app.schemas.blue_team import (
     AuditLogEntry,
-    BuyDefenseRequest,
-    BuyDefenseResponse,
     DashboardStatsResponse,
     InvestigateRequest,
     InvestigateResponse,
 )
-from app.services.defense import process_defense_purchase
 from app.services.forensics import process_investigation
 
 router = APIRouter()
@@ -35,19 +32,6 @@ async def get_my_profile(
         "session_id": str(session.id) if session else None,
         "message": "Welcome to the secure Blue Team zone.",
     }
-
-
-@router.post("/defenses/buy", response_model=BuyDefenseResponse, tags=["Blue Team - Shop"])
-async def buy_defense(
-    request_data: BuyDefenseRequest,
-    current_user: User = Depends(get_blue_team_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Allows Blue Team to spend their defense budget on security patches."""
-    await get_authorized_session(db, request_data.session_id, current_user.lab_instance_id)
-    return await process_defense_purchase(
-        db=db, session_id=request_data.session_id, defense_type=request_data.defense_type
-    )
 
 
 @router.post("/investigate", response_model=InvestigateResponse, tags=["Blue Team - Forensics"])

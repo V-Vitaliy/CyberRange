@@ -28,12 +28,12 @@ from app.db.object_store import ObjectStore, PathTraversalError, get_object_stor
 from app.db.repository import ChatRepository
 from app.db.sqli_isolation import IsolationError
 from app.db.sqli_search import HistoryQueryError
+from app.defense.service import enforce_rate_limit
 from app.labs.service import get_authorized_session
 from app.llm.provider import get_llm_instance
 from app.schemas.red_team import ChatRequest
 from app.services.etl_worker import ETLWorker
 from app.services.rag_service import generate_chat_response_sse
-from app.services.rate_limiter import enforce_rate_limit
 from app.services.siem_logger import log_security_event
 
 logger = logging.getLogger(__name__)

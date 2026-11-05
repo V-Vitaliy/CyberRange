@@ -16,6 +16,7 @@ from app.core.queue_manager import LLMQueueManager
 from app.ctf.router import router as ctf_router
 from app.db.chroma_client import VectorStore
 from app.db.object_store import ObjectStore
+from app.defense.router import router as defense_router
 from app.llm.provider import create_llm
 from app.services.soc_worker import run_soc_analyst_loop
 
@@ -37,6 +38,7 @@ blue_app = FastAPI(
 )
 blue_app.include_router(blue_auth_router, prefix="")
 blue_app.include_router(blue_router, prefix="")
+blue_app.include_router(defense_router, prefix="")
 
 
 @asynccontextmanager
