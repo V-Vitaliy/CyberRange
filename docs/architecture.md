@@ -60,6 +60,10 @@ Implemented in `auth/` (`service.py`, logins in `router.py`).
   verifying it, but takes identity and lab from `lab_scope`; this is an
   intentional exercise. The "JWT Strict Mode" defense switches it to full
   verification.
+- A claimed role that differs from the stored one is logged as
+  `AUTH_BYPASS_ATTEMPT` (claimed role, source IP, `blocked` when Strict Mode
+  rejects it) in the student's own lab, at most once per user, role and outcome
+  per 15 minutes (de-duplicated in Redis; logged every time if Redis is down).
 
 ## Request flows
 

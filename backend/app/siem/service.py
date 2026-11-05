@@ -7,11 +7,15 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.redis_client import redis_client
 from app.db.models import GameSession, SecurityAuditLog
 from app.siem.repository import AuditLogRepository
 from app.siem.schemas import DashboardStatsResponse
 
 logger = logging.getLogger(__name__)
+
+# One AUTH_BYPASS_ATTEMPT per user, claimed role and outcome per window (the default token lifetime).
+JWT_FORGERY_LOG_WINDOW_SECONDS = 15 * 60
 
 
 async def log_security_event(
@@ -46,10 +50,19 @@ async def log_security_event(
         return None
 
 
-async def log_jwt_manipulation_attempt(db: AsyncSession, lab_instance_id: str, provided_role: str, source_ip: str):
+async def log_jwt_manipulation_attempt(
+    db: AsyncSession, lab_instance_id: str, provided_role: str, source_ip: str, *, user_id: str, blocked: bool
+):
     """
     Helper function specifically for logging forged JWT usage.
+    Repeats within the window are dropped; if Redis is down, every attempt is logged.
     """
+    key = f"jwt_forgery:{lab_instance_id}:{user_id}:{provided_role}:{int(blocked)}"
+    try:
+        if not await redis_client.set(key, 1, nx=True, ex=JWT_FORGERY_LOG_WINDOW_SECONDS):
+            return None
+    except Exception:
+        logger.warning("Forgery log de-duplication is unavailable; logging the attempt")
     return await log_security_event(
         db=db,
         lab_instance_id=lab_instance_id,
@@ -57,6 +70,7 @@ async def log_jwt_manipulation_attempt(db: AsyncSession, lab_instance_id: str, p
         payload={
             "description": "Suspicious JWT payload detected.",
             "claimed_role": provided_role,
+            "blocked": blocked,
             "risk_level": "HIGH",
         },
         source_ip=source_ip,
