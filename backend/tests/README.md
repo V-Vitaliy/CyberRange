@@ -7,8 +7,9 @@ of that module instead of creating a file per task.
   `llm_engine`, `rag_service`, `soc`, `defense`, ...). `unit/test_admin_setup.py`
   covers `scripts/admin_setup.py` with doubles and can also run with standard-library
   `unittest` and no backend dependencies.
-- `api/test_<router>.py`: HTTP/WebSocket routes (`routes_red`, `routes_blue`,
-  `routes_ctf` for `ctf/router.py`) and application wiring (`main`).
+- `api/test_<router>.py`: HTTP/WebSocket routes (`routes_red`; `routes_blue` for the
+  Blue routers in `auth`, `defense` and `siem`; `routes_ctf` for `ctf/router.py`) and
+  application wiring (`main`).
 - `integration/`: opt-in tests against real PostgreSQL.
 - Shared fixtures: `conftest.py` (ASGI client) and `unit/conftest.py` (email tool
   harness). `openai_doubles.py` holds offline HTTP doubles for the OpenAI-compatible

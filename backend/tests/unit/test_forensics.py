@@ -7,7 +7,7 @@ from fastapi import HTTPException
 
 from app.db.models import GameSession, SecurityAuditLog
 from app.labs.repository import GameSessionRepository
-from app.services import forensics
+from app.siem import forensics
 
 
 @pytest.mark.asyncio

@@ -34,7 +34,7 @@ from app.llm.provider import get_llm_instance
 from app.schemas.red_team import ChatRequest
 from app.services.etl_worker import ETLWorker
 from app.services.rag_service import generate_chat_response_sse
-from app.services.siem_logger import log_security_event
+from app.siem.service import log_security_event
 
 logger = logging.getLogger(__name__)
 

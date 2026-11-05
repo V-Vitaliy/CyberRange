@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.defense.schemas import BuyDefenseResponse
 from app.labs.service import get_session
-from app.services.siem_logger import log_security_event
+from app.siem.service import log_security_event
 
 logger = logging.getLogger(__name__)
 

@@ -13,6 +13,7 @@ MIGRATED_DOMAINS = {
     "ctf": ["CtfRepository"],
     "defense": [],
     "labs": ["GameSessionRepository"],
+    "siem": ["AuditLogRepository"],
 }
 
 # Route path -> the domain whose router.py must declare it.
@@ -20,6 +21,10 @@ ROUTE_OWNERS = {
     "/login": "auth",
     "/submit": "ctf",
     "/defenses/buy": "defense",
+    "/me": "auth",
+    "/investigate": "siem",
+    "/dashboard": "siem",
+    "/logs": "siem",
 }
 ROUTE_DECORATORS = {"get", "post", "put", "patch", "delete", "websocket"}
 

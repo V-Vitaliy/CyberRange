@@ -150,8 +150,8 @@ async def test_authenticate_rejects_wrong_password_or_unknown_user(stored_user, 
     assert await service.authenticate(object(), username, password) is None
 
 
-def test_login_routes_belong_to_auth_router():
+def test_auth_routers_hold_login_and_blue_profile():
     from app.auth.router import blue_router, red_router
 
-    for router in (red_router, blue_router):
-        assert [(route.path, route.methods) for route in router.routes] == [("/login", {"POST"})]
+    assert [(route.path, route.methods) for route in red_router.routes] == [("/login", {"POST"})]
+    assert [(route.path, route.methods) for route in blue_router.routes] == [("/login", {"POST"}), ("/me", {"GET"})]
