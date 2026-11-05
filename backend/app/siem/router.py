@@ -6,32 +6,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.service import get_blue_team_user
 from app.db.database import get_db
 from app.db.models import User
-from app.db.repository import AuditLogRepository
-from app.labs.service import get_authorized_session, get_session_for_lab
-from app.schemas.blue_team import (
-    AuditLogEntry,
-    DashboardStatsResponse,
-    InvestigateRequest,
-    InvestigateResponse,
-)
-from app.services.forensics import process_investigation
+from app.labs.service import get_authorized_session
+from app.siem import service
+from app.siem.forensics import process_investigation
+from app.siem.schemas import AuditLogEntry, DashboardStatsResponse, InvestigateRequest, InvestigateResponse
 
 router = APIRouter()
-
-
-@router.get("/me", tags=["Blue Team - User"])
-async def get_my_profile(
-    current_user: User = Depends(get_blue_team_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Return the authenticated profile and its laboratory's current session."""
-    session = await get_session_for_lab(db, current_user.lab_instance_id)
-    return {
-        "username": current_user.username,
-        "role": current_user.role,
-        "session_id": str(session.id) if session else None,
-        "message": "Welcome to the secure Blue Team zone.",
-    }
 
 
 @router.post("/investigate", response_model=InvestigateResponse, tags=["Blue Team - Forensics"])
@@ -61,16 +41,7 @@ async def get_dashboard_stats(
     if not game_session:
         raise HTTPException(status_code=404, detail="Game session not found.")
 
-    active_defenses = {
-        "prompt_hardening_enabled": game_session.system_prompt != "You are a helpful university assistant.",
-        "rate_limit_enabled": game_session.rate_limit_enabled,
-        "reranker_enabled": game_session.use_reranker,
-        "jwt_filter_enabled": game_session.jwt_filter_enabled,
-    }
-
-    stats = await AuditLogRepository.get_stats(db, game_session.lab_instance_id)
-
-    return DashboardStatsResponse(budget=game_session.defense_budget, active_defenses=active_defenses, **stats)
+    return await service.get_dashboard_stats(db, game_session)
 
 
 @router.get("/logs", response_model=List[AuditLogEntry], tags=["Blue Team - SIEM"])
@@ -85,4 +56,4 @@ async def get_audit_logs(
     if not game_session:
         raise HTTPException(status_code=404, detail="Game session not found.")
 
-    return await AuditLogRepository.get_logs(db, game_session.lab_instance_id, limit)
+    return await service.get_logs(db, game_session.lab_instance_id, limit)

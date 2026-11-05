@@ -7,7 +7,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.agents.soc_agent import create_soc_graph
-from app.api.routes_blue import router as blue_router
 from app.api.routes_red import router as red_router
 from app.auth.router import blue_router as blue_auth_router
 from app.auth.router import red_router as red_auth_router
@@ -18,7 +17,8 @@ from app.db.chroma_client import VectorStore
 from app.db.object_store import ObjectStore
 from app.defense.router import router as defense_router
 from app.llm.provider import create_llm
-from app.services.soc_worker import run_soc_analyst_loop
+from app.siem.router import router as siem_router
+from app.siem.soc_worker import run_soc_analyst_loop
 
 # 2. Sub-application for Red Team Docs
 red_app = FastAPI(
@@ -37,8 +37,8 @@ blue_app = FastAPI(
     version="1.0.0",
 )
 blue_app.include_router(blue_auth_router, prefix="")
-blue_app.include_router(blue_router, prefix="")
 blue_app.include_router(defense_router, prefix="")
+blue_app.include_router(siem_router, prefix="")
 
 
 @asynccontextmanager

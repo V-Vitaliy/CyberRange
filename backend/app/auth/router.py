@@ -6,9 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.schemas import LoginRequest, TokenResponse
-from app.auth.service import authenticate, create_access_token
+from app.auth.service import authenticate, create_access_token, get_blue_team_user
 from app.db.database import get_db
-from app.services.siem_logger import log_security_event
+from app.db.models import User
+from app.labs.service import get_session_for_lab
+from app.siem.service import log_security_event
 
 red_router = APIRouter()
 blue_router = APIRouter()
@@ -65,3 +67,18 @@ async def login_blue_team(login_data: LoginRequest, db: AsyncSession = Depends(g
     access_token = create_access_token(data=token_data, expires_delta=timedelta(minutes=60))
 
     return {"access_token": access_token, "token_type": "bearer"}
+
+
+@blue_router.get("/me", tags=["Blue Team - User"])
+async def get_my_profile(
+    current_user: User = Depends(get_blue_team_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the authenticated profile and its laboratory's current session."""
+    session = await get_session_for_lab(db, current_user.lab_instance_id)
+    return {
+        "username": current_user.username,
+        "role": current_user.role,
+        "session_id": str(session.id) if session else None,
+        "message": "Welcome to the secure Blue Team zone.",
+    }

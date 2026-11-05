@@ -5,9 +5,9 @@ from uuid import UUID
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.repository import AuditLogRepository
 from app.labs.service import get_session
-from app.schemas.blue_team import InvestigateResponse
+from app.siem.repository import AuditLogRepository
+from app.siem.schemas import InvestigateResponse
 
 
 class MLAnalyzer:

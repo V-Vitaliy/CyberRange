@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.tools.base import AgentTool
 from app.agents.tools.email_tool import SEND_EMAIL
-from app.services.siem_logger import log_security_event
+from app.siem.service import log_security_event
 
 TOOLS: dict[str, AgentTool] = {tool.schema.name: tool for tool in (SEND_EMAIL,)}
 
