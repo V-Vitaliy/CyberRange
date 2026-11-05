@@ -10,8 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.db.ids import ensure_uuid
 from app.db.models import ChatThread
-from app.db.repository import ensure_uuid
 
 
 class ChatRepository:

@@ -19,10 +19,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.service import get_current_user_vulnerable
 from app.core.config import settings
 from app.core.redis_client import get_redis
-from app.db.chroma_client import VectorStore, get_vector_store
 from app.db.database import get_db
-from app.db.object_store import ObjectStore, PathTraversalError, get_object_store, resolve_upload_target
-from app.services.etl_worker import ETLWorker
+from app.documents.chroma_client import VectorStore, get_vector_store
+from app.documents.object_store import ObjectStore, PathTraversalError, get_object_store, resolve_upload_target
+from app.documents.service import ETLWorker
 from app.siem.service import log_security_event
 
 logger = logging.getLogger(__name__)

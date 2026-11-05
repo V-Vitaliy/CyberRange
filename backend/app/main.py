@@ -7,16 +7,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.agents.soc_agent import create_soc_graph
-from app.api.routes_red import router as red_router
 from app.auth.router import blue_router as blue_auth_router
 from app.auth.router import red_router as red_auth_router
 from app.chat.router import router as chat_router
 from app.core.config import require_strong_jwt_secret, settings
 from app.core.queue_manager import LLMQueueManager
 from app.ctf.router import router as ctf_router
-from app.db.chroma_client import VectorStore
-from app.db.object_store import ObjectStore
 from app.defense.router import router as defense_router
+from app.documents.chroma_client import VectorStore
+from app.documents.object_store import ObjectStore
+from app.documents.router import router as documents_router
 from app.llm.provider import create_llm
 from app.siem.router import router as siem_router
 from app.siem.soc_worker import run_soc_analyst_loop
@@ -29,7 +29,7 @@ red_app = FastAPI(
 )
 red_app.include_router(red_auth_router, prefix="")
 red_app.include_router(chat_router, prefix="")
-red_app.include_router(red_router, prefix="")
+red_app.include_router(documents_router, prefix="")
 red_app.include_router(ctf_router, prefix="/ctf")
 
 # 3. Sub-application for Blue Team Docs

@@ -13,7 +13,7 @@ from pypdf import PdfReader
 from redis import Redis
 
 from app.core.config import settings
-from app.db.chroma_client import VectorStore
+from app.documents.chroma_client import VectorStore
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

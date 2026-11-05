@@ -10,7 +10,7 @@ from app.chat.llm_engine import generate_unified_stream
 from app.chat.prompt_builder import PromptBuilder
 from app.chat.repository import ChatRepository
 from app.core.queue_manager import LLMQueueManager
-from app.db.chroma_client import VectorStore
+from app.documents.chroma_client import VectorStore
 from app.labs.service import get_authorized_session
 
 logger = logging.getLogger(__name__)
