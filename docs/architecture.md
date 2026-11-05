@@ -50,6 +50,8 @@ uploaded objects all carry the lab ID.
 
 ## Authentication and roles
 
+Implemented in `auth/` (`service.py`, logins in `router.py`).
+
 - Roles: `red_team`, `blue_team`, `admin`. Passwords are bcrypt hashes.
 - `create_access_token` issues an HS256 JWT signed with `JWT_SECRET` (startup
   fails if it is weak or published). Red Team tokens carry a signed `lab_scope`.
@@ -99,18 +101,19 @@ uploaded objects all carry the lab ID.
 |---|---|
 | `main.py` | App, mounted `red_app` / `blue_app`, lifespan (secret check, stores, model, SOC task), CORS, body size limit |
 | `api/` | Routers: `routes_red.py`, `routes_blue.py`, `routes_ctf.py` |
-| `core/` | `config.py` (settings), `security.py` (JWT, passwords, session authorization), `llm_engine.py` (model streaming), `prompt_builder.py`, `queue_manager.py`, `redis_client.py` |
+| `core/` | `config.py` (settings), `security.py` (CTF flag hashing), `llm_engine.py` (model streaming), `prompt_builder.py`, `queue_manager.py`, `redis_client.py` |
 | `llm/` | `provider.py`: model factory (OpenAI-compatible, Groq, local GGUF) |
 | `agents/` | `soc_agent.py` (LangGraph SOC analyst), `tools/` (tool registry: schema, risk level, audited handler; `send_email`) |
 | `services/` | `rag_service.py`, `etl_worker.py`, `soc_worker.py`, `forensics.py`, `defense.py`, `rate_limiter.py`, `email_service.py`, `siem_logger.py` |
 | `db/` | `models.py`, `repository.py`, `database.py`, `chroma_client.py`, `object_store.py`, `sqli_isolation.py`, `sqli_search.py` |
+| `auth/` | Users and login: `repository.py` (`UserRepository`), `service.py` (passwords, JWT, `authenticate`, `get_current_user_secure`, `get_blue_team_user`, `get_current_user_vulnerable`), `router.py` (Red and Blue `POST /login`), `schemas.py` |
 | `labs/` | Game sessions: `repository.py` (`GameSessionRepository`), `service.py` (`get_session`, `get_session_for_lab`, `get_authorized_session`) |
 | `schemas/` | Pydantic request/response models |
 
 Dependencies point inward: routers → services → repositories. `core/` must not
 import domain repositories. Domain packages (`app/<domain>/` with router,
 service, repository and schemas as needed) are introduced step by step (ARC-3):
-`labs` is migrated; `auth`, `ctf`, `defense`, `siem`, `chat` and `documents`
+`labs` and `auth` are migrated; `ctf`, `defense`, `siem`, `chat` and `documents`
 follow. Other code uses a domain's `service`, never its `repository`; this is
 enforced by `backend/tests/unit/test_architecture.py`.
 

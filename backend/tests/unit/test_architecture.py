@@ -8,7 +8,7 @@ import pytest
 APP = Path(__file__).resolve().parents[2] / "app"
 
 # Domains already moved into app/<domain>/ (ARC-3); their repositories are private.
-MIGRATED_DOMAINS = {"labs": ["GameSessionRepository"]}
+MIGRATED_DOMAINS = {"auth": ["UserRepository"], "labs": ["GameSessionRepository"]}
 
 
 def _modules():
@@ -77,3 +77,30 @@ def test_migrated_domain_package_exists(domain):
     assert (APP / domain / "__init__.py").is_file()
     assert (APP / domain / "repository.py").is_file()
     assert (APP / domain / "service.py").is_file()
+
+
+def test_core_imports_no_repository():
+    offenders = [
+        f"{path}: imports {module}"
+        for path, tree in _modules()
+        if path.parts[0] == "core"
+        for module, _ in _imports(tree)
+        if module.split(".")[-1] == "repository"
+    ]
+    assert offenders == [], "\n".join(offenders)
+
+
+def test_login_routes_are_defined_only_in_auth():
+    offenders = [
+        f"{path}:{node.lineno}"
+        for path, tree in _modules()
+        if path.parts[0] != "auth"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "post"
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+        and node.args[0].value == "/login"
+    ]
+    assert offenders == [], "\n".join(offenders)

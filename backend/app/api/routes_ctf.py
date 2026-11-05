@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import get_current_user_vulnerable, hash_ctf_flag
+from app.auth.service import get_current_user_vulnerable
+from app.core.security import hash_ctf_flag
 from app.db.database import get_db
 from app.db.repository import CtfRepository
 from app.labs.service import get_session_for_lab

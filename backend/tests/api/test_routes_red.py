@@ -8,8 +8,8 @@ import httpx
 import pytest
 
 from app.api import routes_red
+from app.auth.service import get_current_user_vulnerable
 from app.core.redis_client import get_redis
-from app.core.security import get_current_user_vulnerable
 from app.db.chroma_client import get_vector_store
 from app.db.database import get_db
 from app.db.object_store import get_object_store

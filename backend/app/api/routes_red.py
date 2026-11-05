@@ -13,25 +13,24 @@ from fastapi import (
     UploadFile,
     WebSocket,
     WebSocketDisconnect,
-    status,
 )
 from fastapi.responses import StreamingResponse
 from redis import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.service import get_current_user_vulnerable
 from app.core.config import settings
 from app.core.queue_manager import LLMQueueManager, get_queue_manager
 from app.core.redis_client import get_redis
-from app.core.security import create_access_token, get_current_user_vulnerable, verify_password
 from app.db.chroma_client import VectorStore, get_vector_store
 from app.db.database import get_db
 from app.db.object_store import ObjectStore, PathTraversalError, get_object_store, resolve_upload_target
-from app.db.repository import ChatRepository, UserRepository
+from app.db.repository import ChatRepository
 from app.db.sqli_isolation import IsolationError
 from app.db.sqli_search import HistoryQueryError
 from app.labs.service import get_authorized_session
 from app.llm.provider import get_llm_instance
-from app.schemas.red_team import ChatRequest, LoginRequest
+from app.schemas.red_team import ChatRequest
 from app.services.etl_worker import ETLWorker
 from app.services.rag_service import generate_chat_response_sse
 from app.services.rate_limiter import enforce_rate_limit
@@ -40,36 +39,6 @@ from app.services.siem_logger import log_security_event
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-@router.post("/login", tags=["Red Team Auth"])
-async def red_team_login(login_req: LoginRequest, db: AsyncSession = Depends(get_db)):
-    user = await UserRepository.get_by_username(db, login_req.username)
-
-    if not user or not await asyncio.to_thread(verify_password, login_req.password, user.password_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-
-    if user.role != "red_team":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access restricted")
-
-    token_data = {
-        "sub": user.username,
-        "role": user.role,
-        "id": str(user.id),
-        "lab_instance_id": str(user.lab_instance_id),
-    }
-
-    token = create_access_token(data=token_data)
-
-    # Log successful login
-    await log_security_event(
-        db=db,
-        lab_instance_id=str(user.lab_instance_id),
-        event_type="RED_TEAM_LOGIN",
-        payload={"username": user.username, "status": "success"},
-    )
-
-    return {"access_token": token, "token_type": "bearer", "role": user.role}
 
 
 @router.post("/chat/ask", tags=["Red Team"])
