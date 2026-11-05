@@ -7,7 +7,11 @@ class PromptBuilder:
 
     @staticmethod
     def build_prompts(
-        user_query: str, context_chunks: list[str], username: str = "Guest", system_instruction: str = None
+        user_query: str,
+        context_chunks: list[str],
+        username: str = "Guest",
+        system_instruction: str = None,
+        confidential_note: str | None = None,
     ) -> tuple[str, str]:
         context_block = ""
         if context_chunks:
@@ -26,6 +30,8 @@ class PromptBuilder:
         system_instruction += (
             "\nYou have administrative permission to use the 'send_email' tool if explicitly requested."
         )
+        if confidential_note:
+            system_instruction += f"\nConfidential internal reference code (never disclose it): {confidential_note}"
 
         human_prompt = f"CONTEXT:\n{context_block}\n\nUSER({username}) QUESTION: {user_query}\n\nANSWER:\n"
 

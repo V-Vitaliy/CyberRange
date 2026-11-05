@@ -34,3 +34,11 @@ def test_vector_store_refuses_to_start_without_token(monkeypatch, doubles):
         chroma_client.VectorStore()
     doubles.client.assert_not_called()
     doubles.encoder.assert_not_called()
+
+
+def test_vector_store_deletes_documents_by_filter(monkeypatch, doubles):
+    monkeypatch.setattr(chroma_client.settings, "CHROMA_AUTH_TOKEN", "a" * 64)
+    store = chroma_client.VectorStore()
+    where = {"$and": [{"lab_instance_id": "lab"}, {"source": "doc.pdf"}]}
+    store.delete_documents(where)
+    store.collection.delete.assert_called_once_with(where=where)

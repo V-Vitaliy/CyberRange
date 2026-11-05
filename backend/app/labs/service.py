@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.ids import ensure_uuid
 from app.db.models import GameSession
-from app.labs.repository import GameSessionRepository
+from app.labs.repository import GameSessionRepository, LabSecretRepository
 
 
 async def get_session(db: AsyncSession, session_id: str | uuid.UUID, *, for_update: bool = False) -> GameSession | None:
@@ -27,3 +27,9 @@ async def get_authorized_session(db, session_id, lab_instance_id):
     if session is None or session.lab_instance_id != lab_id:
         raise HTTPException(status_code=404, detail="Game session not found")
     return session
+
+
+async def get_exercise_secret(db: AsyncSession, lab_instance_id: str | uuid.UUID, exercise: str) -> str | None:
+    """Plaintext of an exercise secret the lab needs at runtime (EX-03), or None."""
+    secret = await LabSecretRepository.get(db, lab_instance_id, exercise)
+    return secret.value if secret else None

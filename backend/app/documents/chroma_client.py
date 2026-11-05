@@ -36,6 +36,9 @@ class VectorStore:
         embeddings = self.encoder.encode(documents).tolist()
         self.collection.add(embeddings=embeddings, documents=documents, metadatas=metadatas, ids=ids)
 
+    def delete_documents(self, where: dict) -> None:
+        self.collection.delete(where=where)
+
     def search_documents(self, query: str, n_results: int = 5, where: dict = None) -> dict:
         """
         Embeds the query and searches for the most similar documents in ChromaDB.
