@@ -9,9 +9,17 @@ from langchain_core.messages import AIMessageChunk
 
 from app.chat import service as rag_service
 from app.chat import sqli_search
+from app.chat.prompt_builder import PromptBuilder
 from app.chat.repository import ChatRepository
 from app.core.queue_manager import LLMQueueManager
 from app.db.models import GameSession
+
+
+@pytest.fixture(autouse=True)
+def no_exercise_secret(monkeypatch):
+    lookup = AsyncMock(return_value=None)
+    monkeypatch.setattr(rag_service, "get_exercise_secret", lookup, raising=False)
+    return lookup
 
 
 @pytest.mark.asyncio
@@ -270,3 +278,42 @@ async def test_thread_lookup_checks_owner_and_session(monkeypatch):
     db = object()
     assert await rag_service.get_or_create_thread(db, "thread", "user", "session", "prompt") is thread
     lookup.assert_awaited_once_with(db, "thread", "user", "session", "prompt")
+
+
+@pytest.mark.asyncio
+async def test_ex03_secret_reaches_the_model_even_after_prompt_patch(monkeypatch, no_exercise_secret):
+    session = SimpleNamespace(
+        lab_instance_id=uuid4(), use_reranker=False, system_prompt="You are a highly secure AI. (Prompt Patch)"
+    )
+    monkeypatch.setattr(rag_service, "get_authorized_session", AsyncMock(return_value=session))
+    monkeypatch.setattr(ChatRepository, "get_or_create_thread", AsyncMock())
+    monkeypatch.setattr(ChatRepository, "append_messages", AsyncMock())
+    no_exercise_secret.return_value = "flag{" + "a" * 32 + "}"
+    captured = {}
+
+    async def stream(**kwargs):
+        captured.update(kwargs)
+        yield "answer"
+
+    monkeypatch.setattr(rag_service, "generate_unified_stream", stream)
+    store = SimpleNamespace(search_documents=Mock(return_value={"documents": [[]]}))
+    user = dict(id=str(uuid4()), sub="student", role="red_team", lab_instance_id=str(session.lab_instance_id))
+    db = object()
+    async for _ in rag_service.generate_chat_response_sse(
+        db, uuid4(), uuid4(), "question", LLMQueueManager(), store, user, object()
+    ):
+        pass
+    no_exercise_secret.assert_awaited_once_with(db, session.lab_instance_id, "EX-03")
+    assert "(Prompt Patch)" in captured["system_prompt"]
+    assert "flag{" + "a" * 32 + "}" in captured["system_prompt"]
+    assert "flag{" not in captured["human_prompt"]
+
+
+def test_confidential_note_follows_any_system_instruction():
+    note = "flag{" + "b" * 32 + "}"
+    for instruction in (None, "Custom instruction"):
+        system, human = PromptBuilder.build_prompts("q", [], system_instruction=instruction, confidential_note=note)
+        assert note in system and note not in human
+        if instruction:
+            assert system.index(instruction) < system.index(note)
+    assert "confidential" not in PromptBuilder.build_prompts("q", [])[0].lower()

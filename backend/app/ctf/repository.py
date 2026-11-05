@@ -40,3 +40,11 @@ class CtfRepository:
         )
         db.add(submission)
         await db.commit()
+
+    @staticmethod
+    async def add_flag(db: AsyncSession, flag_hash: str, reward: int, lab_instance_id: str | uuid.UUID) -> CtfFlag:
+        """Stage a flag in the caller's transaction; the flush assigns its ID."""
+        flag = CtfFlag(flag_value=flag_hash, reward=reward, lab_id=str(ensure_uuid(lab_instance_id)))
+        db.add(flag)
+        await db.flush()
+        return flag

@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.db.ids import ensure_uuid
-from app.db.models import GameSession
+from app.db.models import GameSession, LabSecret
 
 
 class GameSessionRepository:
@@ -25,3 +25,29 @@ class GameSessionRepository:
             select(GameSession).where(GameSession.lab_instance_id == ensure_uuid(lab_instance_id))
         )
         return result.scalars().first()
+
+
+class LabSecretRepository:
+    """Exercise flags seeded into a lab."""
+
+    @staticmethod
+    async def get(db: AsyncSession, lab_instance_id: str | uuid.UUID, exercise: str) -> Optional[LabSecret]:
+        result = await db.execute(
+            select(LabSecret).where(
+                LabSecret.lab_instance_id == ensure_uuid(lab_instance_id), LabSecret.exercise == exercise
+            )
+        )
+        return result.scalars().first()
+
+    @staticmethod
+    async def exercises_for_lab(db: AsyncSession, lab_instance_id: str | uuid.UUID) -> set[str]:
+        result = await db.execute(
+            select(LabSecret.exercise).where(LabSecret.lab_instance_id == ensure_uuid(lab_instance_id))
+        )
+        return set(result.scalars().all())
+
+    @staticmethod
+    def add(db: AsyncSession, **values) -> LabSecret:
+        row = LabSecret(**values)
+        db.add(row)
+        return row

@@ -20,9 +20,9 @@ or the classic OWASP Top 10.
 |---|---|---|---|---|
 | EX-01 | Make the assistant break its rules | LLM01 | Prompt Patch | Partial |
 | EX-02 | Poison the knowledge base | LLM04, LLM08 | Reranker | Partial |
-| EX-03 | Make the agent leak a secret | LLM06, LLM02 | none yet | Partial |
+| EX-03 | Make the agent leak a secret | LLM06, LLM02 | none yet | Playable |
 | EX-04 | Read other users' conversations | A03 | none yet | Playable |
-| EX-05 | Read restricted documents | A01, A07 | JWT Strict Mode | Partial |
+| EX-05 | Read restricted documents | A01, A07 | JWT Strict Mode | Playable |
 | EX-06 | Exhaust the shared model | LLM10 | Rate Limiter | Playable |
 | EX-07 | Find valid accounts | A07 | none yet | Partial |
 
@@ -92,7 +92,8 @@ or not yet visible to the Blue Team; `Planned`: not implemented.
 ## Flags
 
 Flags look like `flag{...}`. Submit them with `POST /api/red/ctf/submit`; each flag
-is scored once for your team. Flags are not yet seeded for every exercise.
+is scored once for your team and only in your own lab. EX-03, EX-04 and EX-05 each
+hide one flag in your lab.
 
 ## OWASP LLM Top 10 coverage
 

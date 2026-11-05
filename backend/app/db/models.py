@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.sql import func
 
@@ -112,3 +112,19 @@ class CtfSubmission(Base):
     flag_id = Column(Integer, ForeignKey("ctf_flags.id"), nullable=False)
     submitted_at = Column(DateTime(timezone=True), server_default=func.now())
     lab_instance_id = Column(UUID(as_uuid=True), nullable=False)
+
+
+class LabSecret(Base):
+    """
+    Which exercise flags a lab already has. The plaintext is kept only where the
+    exercise needs it at runtime (EX-03: the assistant's context); otherwise it is null.
+    """
+
+    __tablename__ = "lab_secrets"
+    __table_args__ = (UniqueConstraint("lab_instance_id", "exercise"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    lab_instance_id = Column(UUID(as_uuid=True), nullable=False)
+    exercise = Column(String, nullable=False)
+    flag_id = Column(Integer, ForeignKey("ctf_flags.id"), nullable=False)
+    value = Column(Text, nullable=True)

@@ -1,6 +1,6 @@
 # Running locally with Groq or an OpenAI-compatible server
 
-CyberRange is a learning project with intentional vulnerabilities. This document describes how to run the existing application manually; the commands are not executed automatically. Table, user, and session setup is implemented in `scripts/admin_setup.py`; isolated SQLi preparation is described below. Learning documents/CTF remain separate tasks.
+CyberRange is a learning project with intentional vulnerabilities. This document describes how to run the existing application manually; the commands are not executed automatically. Table, user, and session setup is implemented in `scripts/admin_setup.py`; isolated SQLi preparation is described below. Exercise flags are seeded by `scripts/seed_exercises.py`.
 
 ## 1. Environment
 
@@ -168,11 +168,37 @@ with its own flag row and reward. Unknown and foreign flags receive the same
 and the authenticated lab. This rule does not alter the schema or rewrite any
 existing flags. Legacy scenario identifiers or other noncanonical lab values
 will not match; inspect existing data and agree on any mapping separately before
-changing those records. Setup does not create or assign educational flags.
+changing those records. `admin_setup` itself does not create educational flags;
+see [Seeding exercise flags](#seeding-exercise-flags).
 
 The connection requires `CONNECT` on the database, `USAGE` and `CREATE` on the target schema (usually `public`), and read/insert permissions on `users`/`game_sessions`. Creating missing tables also requires appropriate permissions on the types and referenced tables. For a clean local database, the owner role from Compose is sufficient. This is an administrative connection, not the connection for future SQLi exercises. An incompatible existing schema causes failure: schema repair is separate, with no automatic reset.
 
-Failures produce a short message without the DSN, passwords, or SQL parameters, and a nonzero exit code. If the connection is lost during commit, the outcome may be unknown: after recovery, repeat the command with the same parameters. This script does not yet load learning documents or flags.
+Failures produce a short message without the DSN, passwords, or SQL parameters, and a nonzero exit code. If the connection is lost during commit, the outcome may be unknown: after recovery, repeat the command with the same parameters. This script does not load learning documents or flags.
+
+### Seeding exercise flags
+
+After `admin_setup`, seed the scored flags of one lab. Unlike `admin_setup`, this
+step needs the running stack: PostgreSQL, Redis, Chroma and the embedding model.
+
+```bash
+python scripts/seed_exercises.py --lab-id 65319dde-b9fd-4aa2-9988-1467f46100a1
+```
+
+- It creates a random `flag{...}` per exercise, stored only as a SHA-256 hash in
+  `ctf_flags` for this lab:
+  - **EX-03**: a secret in the assistant's system context; it stays there after
+    Prompt Patch. Its plaintext is kept in `lab_secrets` because the model needs it.
+  - **EX-04**: a chat thread of a hidden `staff_<lab>` user (role `staff`, random
+    password that is never stored or shown), reachable only through the SQLi views.
+  - **EX-05**: a one-page PDF indexed by the upload pipeline with
+    `access_level=private`; retrieval returns it only to the `admin` role.
+- The output JSON lists the new flag values under `created`. **They are printed
+  only once**: store them for grading and never share them with students.
+- Repeating the command creates only missing flags and prints nothing for
+  existing ones. The private PDF is indexed before any database write; if
+  indexing fails, the database is not changed.
+- Missing tables (`lab_secrets` on older databases) are created; existing ones
+  are not migrated.
 
 ### Preparing the educational SQLi search
 

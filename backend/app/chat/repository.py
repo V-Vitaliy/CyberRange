@@ -89,3 +89,11 @@ class ChatRepository:
 
             flag_modified(thread, "messages")
             await db.commit()
+
+    @staticmethod
+    async def add_thread(db: AsyncSession, **values) -> ChatThread:
+        """Stage a thread in the caller's transaction (no commit)."""
+        thread = ChatThread(**values)
+        db.add(thread)
+        await db.flush()
+        return thread

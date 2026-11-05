@@ -13,7 +13,8 @@ of that module instead of creating a file per task.
   wiring (`main`).
 - `integration/`: opt-in tests against real PostgreSQL.
 - Shared fixtures: `conftest.py` (ASGI client) and `unit/conftest.py` (email tool
-  harness). `openai_doubles.py` holds offline HTTP doubles for the OpenAI-compatible
+  harness). `sqlite_async.py` runs awaited application SQL against in-memory SQLite
+  (used by `api/test_routes_ctf.py` and `unit/test_exercises.py`; not PostgreSQL). `openai_doubles.py` holds offline HTTP doubles for the OpenAI-compatible
   adapter.
 
 The default tests use external service doubles: PostgreSQL, Redis, Chroma, LLM,

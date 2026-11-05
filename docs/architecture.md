@@ -114,7 +114,7 @@ Implemented in `auth/` (`service.py`, logins in `router.py`).
 | `ctf/` | Flag submission: `repository.py` (`CtfRepository`), `service.py` (`hash_ctf_flag`, `submit_flag`), `router.py` (`POST /api/red/ctf/submit`), `schemas.py` |
 | `defense/` | Defense shop and rate limit: `service.py` (`process_defense_purchase`, `enforce_rate_limit`), `router.py` (`POST /api/blue/defenses/buy`), `schemas.py` |
 | `documents/` | Uploads and RAG documents: `service.py` (`ETLWorker`: PDF parsing, chunking, embedding), `object_store.py` (S3 uploads, lab-prefixed keys), `chroma_client.py` (`VectorStore`), `router.py` (`POST /api/red/upload`, `/api/red/ws/etl-status/{task_id}`) |
-| `labs/` | Game sessions: `repository.py` (`GameSessionRepository`), `service.py` (`get_session`, `get_session_for_lab`, `get_authorized_session`) |
+| `labs/` | Game sessions and exercise seeding: `repository.py` (`GameSessionRepository`, `LabSecretRepository`), `service.py` (`get_session`, `get_session_for_lab`, `get_authorized_session`, `get_exercise_secret`), `exercises.py` (per-lab flags for EX-03/04/05, used by `scripts/seed_exercises.py`) |
 | `siem/` | SIEM events: `repository.py` (`AuditLogRepository`), `service.py` (`log_security_event` for every domain, dashboard stats, logs), `forensics.py` (Blue Team investigation), `soc_worker.py` (Auto-SOC loop), `router.py` (`/investigate`, `/dashboard`, `/logs`), `schemas.py` |
 
 Each domain package (`app/<domain>/`) holds its `router.py`, `service.py`,

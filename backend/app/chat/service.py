@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import re
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,7 +11,7 @@ from app.chat.prompt_builder import PromptBuilder
 from app.chat.repository import ChatRepository
 from app.core.queue_manager import LLMQueueManager
 from app.documents.chroma_client import VectorStore
-from app.labs.service import get_authorized_session
+from app.labs.service import get_authorized_session, get_exercise_secret
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,13 @@ _reranker = None
 async def get_or_create_thread(db: AsyncSession, thread_id, user_id, session_id, initial_prompt: str):
     """Return the caller's thread, creating it on first use; a foreign thread is a 404."""
     return await ChatRepository.get_or_create_thread(db, thread_id, user_id, session_id, initial_prompt)
+
+
+async def add_seeded_thread(db: AsyncSession, user_id, session_id, title: str, messages: list[dict]):
+    """A ready-made conversation for an exercise; staged in the caller's transaction."""
+    return await ChatRepository.add_thread(
+        db, id=uuid4(), user_id=user_id, session_id=session_id, title=title, messages=messages
+    )
 
 
 async def search_chat_history(lab_id, session_id, query):
@@ -86,11 +93,15 @@ async def generate_chat_response_sse(
 
         clean_username = re.sub(r"[^a-zA-Z0-9_]", "", user.get("sub", "Guest")) or "Guest"
 
+        # EX-03: the lab's secret stays in context even after Prompt Patch replaces the instruction.
+        secret = await get_exercise_secret(db, session.lab_instance_id, "EX-03")
+
         system_prompt, human_prompt = PromptBuilder.build_prompts(
             user_query=prompt,
             context_chunks=context_texts,
             system_instruction=session.system_prompt,
             username=clean_username,
+            confidential_note=secret,
         )
 
         async def llm_task():

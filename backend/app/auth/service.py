@@ -2,6 +2,8 @@
 
 import asyncio
 import hashlib
+import secrets
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
@@ -196,6 +198,24 @@ async def get_current_user_vulnerable(
         }
     except (jwt.InvalidTokenError, ValueError, TypeError, KeyError, AttributeError) as exc:
         raise HTTPException(status_code=401, detail="Invalid token; please re-login") from exc
+
+
+async def get_or_create_hidden_user(db: AsyncSession, username: str, role: str, lab_instance_id) -> User:
+    """A lab user nobody can log in as: its random password is never stored or shown."""
+    user = await UserRepository.get_by_username(db, username)
+    if user is not None:
+        if user.role != role or user.lab_instance_id != ensure_uuid(lab_instance_id):
+            raise ValueError("The username belongs to a user with a different role or lab.")
+        return user
+    password_hash = await asyncio.to_thread(get_password_hash, secrets.token_urlsafe(32))
+    return await UserRepository.add(
+        db,
+        id=uuid.uuid4(),
+        username=username,
+        role=role,
+        lab_instance_id=ensure_uuid(lab_instance_id),
+        password_hash=password_hash,
+    )
 
 
 async def authenticate(db: AsyncSession, username: str, password: str) -> User | None:

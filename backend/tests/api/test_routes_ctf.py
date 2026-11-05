@@ -20,24 +20,9 @@ from app.auth.service import create_access_token
 from app.ctf import service as ctf_service
 from app.ctf.repository import CtfRepository
 from app.db.database import get_db
-from app.db.models import CtfFlag, CtfSubmission, GameSession, User
+from app.db.models import ChatThread, CtfFlag, CtfSubmission, GameSession, LabSecret, User
 from app.main import app, red_app
-
-
-class AsyncDatabase:
-    """Run the application's awaited repository SQL against an in-memory database."""
-
-    def __init__(self, session):
-        self.session = session
-
-    async def execute(self, statement):
-        return self.session.execute(statement)
-
-    def add(self, row):
-        self.session.add(row)
-
-    async def commit(self):
-        self.session.commit()
+from tests.sqlite_async import AsyncDatabase
 
 
 def flag_hash(value):
@@ -47,7 +32,7 @@ def flag_hash(value):
 @pytest.fixture
 def ctf(monkeypatch):
     engine = create_engine("sqlite://")
-    for model in (User, GameSession, CtfFlag, CtfSubmission):
+    for model in (User, GameSession, ChatThread, CtfFlag, CtfSubmission, LabSecret):
         model.__table__.create(engine)
     with Session(engine, expire_on_commit=False) as session:
         labs, teams = [uuid4(), uuid4()], [uuid4(), uuid4()]
@@ -175,3 +160,23 @@ async def test_forged_role_on_http_request_is_logged_with_client_ip(ctf, monkeyp
     assert forgery_log.await_args.kwargs["lab_instance_id"] == str(ctf.labs[0])
     assert forgery_log.await_args.kwargs["provided_role"] == "admin"
     assert forgery_log.await_args.kwargs["source_ip"] == "127.0.0.1"
+
+
+async def no_index(content, filename, lab_instance_id):
+    return 1
+
+
+@pytest.mark.asyncio
+async def test_seeded_flags_score_once_in_their_own_lab_only(ctf):
+    from app.labs.exercises import seed_exercise_flags
+
+    flags = await seed_exercise_flags(ctf.db, ctf.labs[0], no_index)
+    ctf.session.commit()
+    assert sorted(flags) == ["EX-03", "EX-04", "EX-05"]
+    for value in flags.values():
+        assert (await submit(ctf, value, lab=1)).status_code == 400  # Another lab never scores it.
+        assert (await submit(ctf, value, lab=0)).status_code == 200
+        assert (await submit(ctf, value, lab=0)).status_code == 400  # Already captured.
+    rows = list(ctf.session.scalars(select(CtfSubmission)))
+    assert len(rows) == 3
+    assert {row.lab_instance_id for row in rows} == {ctf.labs[0]}

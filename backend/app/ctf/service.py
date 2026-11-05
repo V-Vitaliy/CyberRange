@@ -15,6 +15,11 @@ def hash_ctf_flag(flag_value: str) -> str:
     return hashlib.sha256(flag_value.encode("utf-8")).hexdigest()
 
 
+async def register_flag(db: AsyncSession, lab_instance_id, flag_value: str, reward: int):
+    """Store only the hash of a new flag for one lab; the caller commits."""
+    return await CtfRepository.add_flag(db, hash_ctf_flag(flag_value), reward, lab_instance_id)
+
+
 async def submit_flag(db: AsyncSession, user: dict, flag_value: str) -> dict:
     """Credit a flag of the player's own lab to their team, once."""
     user_id = user.get("id")
