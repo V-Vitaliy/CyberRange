@@ -61,6 +61,9 @@ class FakeRedis:
         self.keys.add(key)
         return True
 
+    async def delete(self, key):
+        self.keys.discard(key)
+
 
 def recording_db():
     added = []
@@ -124,3 +127,14 @@ async def test_forgery_is_still_logged_when_redis_is_down(monkeypatch):
     await forgery(db, lab, user)
     await forgery(db, lab, user)
     assert len(added) == 2
+
+
+@pytest.mark.asyncio
+async def test_failed_event_write_releases_the_window(monkeypatch):
+    monkeypatch.setattr(service, "redis_client", FakeRedis(), raising=False)
+    db, added = recording_db()
+    lab, user = str(uuid4()), str(uuid4())
+    db.commit = AsyncMock(side_effect=[RuntimeError("database down"), None])
+    await forgery(db, lab, user)  # log_security_event rolls back and returns None.
+    await forgery(db, lab, user)
+    assert db.commit.await_count == 2

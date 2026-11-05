@@ -59,11 +59,13 @@ async def log_jwt_manipulation_attempt(
     """
     key = f"jwt_forgery:{lab_instance_id}:{user_id}:{provided_role}:{int(blocked)}"
     try:
-        if not await redis_client.set(key, 1, nx=True, ex=JWT_FORGERY_LOG_WINDOW_SECONDS):
+        reserved = await redis_client.set(key, 1, nx=True, ex=JWT_FORGERY_LOG_WINDOW_SECONDS)
+        if not reserved:
             return None
     except Exception:
+        reserved = False
         logger.warning("Forgery log de-duplication is unavailable; logging the attempt")
-    return await log_security_event(
+    event = await log_security_event(
         db=db,
         lab_instance_id=lab_instance_id,
         event_type="AUTH_BYPASS_ATTEMPT",
@@ -75,6 +77,13 @@ async def log_jwt_manipulation_attempt(
         },
         source_ip=source_ip,
     )
+    if event is None and reserved:
+        # The write failed: let the next attempt try again instead of hiding it for the window.
+        try:
+            await redis_client.delete(key)
+        except Exception:
+            logger.warning("Could not release the forgery log window after a failed write")
+    return event
 
 
 async def get_dashboard_stats(db: AsyncSession, game_session: GameSession) -> DashboardStatsResponse:
