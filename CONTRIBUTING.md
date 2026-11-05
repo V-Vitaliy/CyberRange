@@ -30,6 +30,24 @@ Every change starts from a GitHub issue created with the **Task** template.
 - Commit messages: `AREA-N: what changed`.
 - The pull request description starts with `Closes #<issue>` and lists how the
   change was verified.
+- Every pull request has exactly one review level label. It picks the model of
+  the automated Azure review:
+
+  | Label | Use for |
+  | --- | --- |
+  | `review:easy` | Docs, comments, config values, mechanical renames without logic changes |
+  | `review:medium` | Ordinary logic changes with tests (the default when no label is set) |
+  | `review:hard` | Platform security and isolation, auth and tokens, cross-module refactors, concurrency, data migrations |
+
+  Adding a label at creation fires the review twice (`opened` and `labeled`).
+  Open the PR as a draft with the label, then mark it ready, so it runs once:
+
+  ```bash
+  gh pr create --draft --label review:medium ...
+  gh pr ready
+  ```
+
+  Changing the label later starts a new review with the new level.
 - After merge the remote branch is deleted automatically. Clean up locally:
 
   ```bash
