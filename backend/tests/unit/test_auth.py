@@ -1,6 +1,6 @@
 from datetime import timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import jwt
@@ -187,7 +187,6 @@ async def test_role_forgery_is_logged_with_claimed_role_and_source_ip(identity, 
     else:
         assert (await service.get_current_user_vulnerable(f"Bearer {forged}", db, CLIENT))["role"] == "admin"
     forgery_log.assert_awaited_once_with(
-        db=db,
         lab_instance_id=str(user.lab_instance_id),
         provided_role="admin",
         source_ip="203.0.113.9",
@@ -222,3 +221,23 @@ async def test_forgery_without_connection_logs_unknown_source(identity, forgery_
     forged = forge_role(service.create_access_token(claims))
     await service.get_current_user_vulnerable(f"Bearer {forged}", object())
     assert forgery_log.await_args.kwargs["source_ip"] == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_failed_audit_write_leaves_the_request_session_alone(identity, monkeypatch):
+    from app.siem import service as siem
+    from tests.unit.test_siem import AuditSessions, FakeRedis
+
+    _, _, claims = identity
+    monkeypatch.setattr(service, "log_jwt_manipulation_attempt", siem.log_jwt_manipulation_attempt)
+    audit = AuditSessions(commit_errors=[True])
+    monkeypatch.setattr(siem, "async_session", audit, raising=False)
+    monkeypatch.setattr(siem, "redis_client", FakeRedis())
+    request_db = SimpleNamespace(add=Mock(), commit=AsyncMock(), rollback=AsyncMock())
+    forged = forge_role(service.create_access_token(claims))
+    result = await service.get_current_user_vulnerable(f"Bearer {forged}", request_db, CLIENT)
+    assert result["role"] == "admin"
+    assert audit.rollbacks == 1
+    request_db.add.assert_not_called()
+    request_db.commit.assert_not_awaited()
+    request_db.rollback.assert_not_awaited()

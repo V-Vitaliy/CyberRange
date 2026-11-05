@@ -29,7 +29,6 @@ async def execute_tool_call(call: ToolCallChunk, db: AsyncSession, lab_instance_
         args = agent_tool.schema.args_schema.model_validate(raw_args, strict=True)
     except (ValueError, TypeError):
         await log_security_event(
-            db=db,
             lab_instance_id=lab_instance_id,
             event_type="AI_TOOL_FAILED",
             payload={"tool": name, "reason": "Invalid tool or arguments"},
@@ -39,7 +38,6 @@ async def execute_tool_call(call: ToolCallChunk, db: AsyncSession, lab_instance_
 
     result = await agent_tool.handler(args)
     await log_security_event(
-        db=db,
         lab_instance_id=lab_instance_id,
         event_type=result.event_type,
         payload={**result.payload, "tool": name, "risk": agent_tool.risk},

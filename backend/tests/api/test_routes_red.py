@@ -173,7 +173,7 @@ async def test_history_awaits_lab_search_and_preserves_response(history, query):
     event = history.log.call_args.kwargs
     assert event["event_type"] == "DB_QUERY"
     assert event["payload"] == {"query_param": query, "target": "chat_history"}
-    assert event["db"] is history.db
+    assert "db" not in event  # SIEM writes in its own session, not the request one.
 
 
 @pytest.mark.asyncio

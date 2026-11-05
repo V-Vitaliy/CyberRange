@@ -65,24 +65,75 @@ class FakeRedis:
         self.keys.discard(key)
 
 
-def recording_db():
-    added = []
-    db = SimpleNamespace(add=added.append, commit=AsyncMock(), refresh=AsyncMock(), rollback=AsyncMock())
-    return db, added
+class AuditSessions:
+    """Stand-in for async_session(): each event gets its own session; commits can be made to fail."""
+
+    def __init__(self, commit_errors=()):
+        self.added, self.opened, self.rollbacks = [], 0, 0
+        self.commit_errors = list(commit_errors)
+
+    def __call__(self):
+        return self
+
+    async def __aenter__(self):
+        self.opened += 1
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def add(self, row):
+        self.added.append(row)
+
+    async def commit(self):
+        if self.commit_errors and self.commit_errors.pop(0):
+            raise RuntimeError("database down")
+
+    async def refresh(self, row):
+        pass
+
+    async def rollback(self):
+        self.rollbacks += 1
 
 
-async def forgery(db, lab, user, role="admin", blocked=False):
-    await service.log_jwt_manipulation_attempt(db, lab, role, "203.0.113.9", user_id=user, blocked=blocked)
+@pytest.fixture
+def audit(monkeypatch):
+    sessions = AuditSessions()
+    monkeypatch.setattr(service, "async_session", sessions, raising=False)
+    monkeypatch.setattr(service, "redis_client", FakeRedis(), raising=False)
+    return sessions
+
+
+async def forgery(lab, user, role="admin", blocked=False):
+    await service.log_jwt_manipulation_attempt(lab, role, "203.0.113.9", user_id=user, blocked=blocked)
+
+
+@pytest.mark.asyncio
+async def test_event_is_written_in_its_own_session(audit):
+    lab = str(uuid4())
+    event = await service.log_security_event(lab, "TEST_EVENT", {"k": "v"}, source_ip="203.0.113.9")
+    assert audit.opened == 1
+    assert audit.added == [event]
+    assert (event.lab_instance_id, event.event_type, event.payload) == (
+        lab,
+        "TEST_EVENT",
+        {"k": "v", "source_ip": "203.0.113.9"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_failed_write_rolls_back_only_its_own_session(audit):
+    audit.commit_errors = [True]
+    assert await service.log_security_event(str(uuid4()), "TEST_EVENT", {}) is None
+    assert audit.rollbacks == 1
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("claimed,malicious", [("admin", True), ("blue_team", True), ("red_team", False)])
-async def test_jwt_forgery_event_is_judged_by_the_forensics_rule(monkeypatch, claimed, malicious):
-    monkeypatch.setattr(service, "redis_client", FakeRedis(), raising=False)
-    db, added = recording_db()
+async def test_jwt_forgery_event_is_judged_by_the_forensics_rule(audit, claimed, malicious):
     lab = str(uuid4())
-    await forgery(db, lab, str(uuid4()), claimed, blocked=True)
-    [event] = added
+    await forgery(lab, str(uuid4()), claimed, blocked=True)
+    [event] = audit.added
     assert (event.event_type, event.lab_instance_id) == ("AUTH_BYPASS_ATTEMPT", lab)
     assert event.payload["claimed_role"] == claimed
     assert event.payload["source_ip"] == "203.0.113.9"
@@ -91,27 +142,22 @@ async def test_jwt_forgery_event_is_judged_by_the_forensics_rule(monkeypatch, cl
 
 
 @pytest.mark.asyncio
-async def test_repeated_forgery_is_logged_once_per_window(monkeypatch):
-    redis = FakeRedis()
-    monkeypatch.setattr(service, "redis_client", redis, raising=False)
-    db, added = recording_db()
+async def test_repeated_forgery_is_logged_once_per_window(audit):
     lab, user = str(uuid4()), str(uuid4())
     for _ in range(3):
-        await forgery(db, lab, user)
-    assert len(added) == 1
-    assert set(redis.ttls) == {service.JWT_FORGERY_LOG_WINDOW_SECONDS}
+        await forgery(lab, user)
+    assert len(audit.added) == 1
+    assert set(service.redis_client.ttls) == {service.JWT_FORGERY_LOG_WINDOW_SECONDS}
 
 
 @pytest.mark.asyncio
-async def test_new_role_user_or_blocking_starts_a_new_event(monkeypatch):
-    monkeypatch.setattr(service, "redis_client", FakeRedis(), raising=False)
-    db, added = recording_db()
+async def test_new_role_user_or_blocking_starts_a_new_event(audit):
     lab, user = str(uuid4()), str(uuid4())
-    await forgery(db, lab, user)
-    await forgery(db, lab, user, role="blue_team")
-    await forgery(db, lab, str(uuid4()))
-    await forgery(db, lab, user, blocked=True)  # Strict Mode bought: the first rejection is visible.
-    assert [(e.payload["claimed_role"], e.payload["blocked"]) for e in added] == [
+    await forgery(lab, user)
+    await forgery(lab, user, role="blue_team")
+    await forgery(lab, str(uuid4()))
+    await forgery(lab, user, blocked=True)  # Strict Mode bought: the first rejection is visible.
+    assert [(e.payload["claimed_role"], e.payload["blocked"]) for e in audit.added] == [
         ("admin", False),
         ("blue_team", False),
         ("admin", False),
@@ -120,21 +166,19 @@ async def test_new_role_user_or_blocking_starts_a_new_event(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_forgery_is_still_logged_when_redis_is_down(monkeypatch):
-    monkeypatch.setattr(service, "redis_client", FakeRedis(fail=True), raising=False)
-    db, added = recording_db()
+async def test_forgery_is_still_logged_when_redis_is_down(audit, monkeypatch):
+    monkeypatch.setattr(service, "redis_client", FakeRedis(fail=True))
     lab, user = str(uuid4()), str(uuid4())
-    await forgery(db, lab, user)
-    await forgery(db, lab, user)
-    assert len(added) == 2
+    await forgery(lab, user)
+    await forgery(lab, user)
+    assert len(audit.added) == 2
 
 
 @pytest.mark.asyncio
-async def test_failed_event_write_releases_the_window(monkeypatch):
-    monkeypatch.setattr(service, "redis_client", FakeRedis(), raising=False)
-    db, added = recording_db()
+async def test_failed_event_write_releases_the_window(audit):
+    audit.commit_errors = [True, False]
     lab, user = str(uuid4()), str(uuid4())
-    db.commit = AsyncMock(side_effect=[RuntimeError("database down"), None])
-    await forgery(db, lab, user)  # log_security_event rolls back and returns None.
-    await forgery(db, lab, user)
-    assert db.commit.await_count == 2
+    await forgery(lab, user)  # log_security_event rolls back and returns None.
+    await forgery(lab, user)
+    assert audit.opened == 2
+    assert audit.commit_errors == []
