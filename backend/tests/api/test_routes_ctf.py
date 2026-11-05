@@ -162,15 +162,11 @@ async def test_forged_role_on_http_request_is_logged_with_client_ip(ctf, monkeyp
     assert forgery_log.await_args.kwargs["source_ip"] == "127.0.0.1"
 
 
-async def no_index(content, filename, lab_instance_id):
-    return 1
-
-
 @pytest.mark.asyncio
 async def test_seeded_flags_score_once_in_their_own_lab_only(ctf):
     from app.labs.exercises import seed_exercise_flags
 
-    flags = await seed_exercise_flags(ctf.db, ctf.labs[0], no_index)
+    flags = await seed_exercise_flags(ctf.db, ctf.labs[0])
     ctf.session.commit()
     assert sorted(flags) == ["EX-03", "EX-04", "EX-05"]
     for value in flags.values():

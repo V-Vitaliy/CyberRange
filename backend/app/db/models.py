@@ -116,8 +116,9 @@ class CtfSubmission(Base):
 
 class LabSecret(Base):
     """
-    Which exercise flags a lab already has. The plaintext is kept only where the
-    exercise needs it at runtime (EX-03: the assistant's context); otherwise it is null.
+    Which exercise flags a lab already has. The plaintext is kept only where the lab
+    needs it after seeding (EX-03: the assistant's context; EX-05: rebuilding its
+    private document); otherwise it is null.
     """
 
     __tablename__ = "lab_secrets"

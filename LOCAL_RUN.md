@@ -188,15 +188,21 @@ python scripts/seed_exercises.py --lab-id 65319dde-b9fd-4aa2-9988-1467f46100a1
   `ctf_flags` for this lab:
   - **EX-03**: a secret in the assistant's system context; it stays there after
     Prompt Patch. Its plaintext is kept in `lab_secrets` because the model needs it.
-  - **EX-04**: a chat thread of a hidden `staff_<lab>` user (role `staff`, random
+  - **EX-04**: a chat thread of a hidden `staff_<lab UUID hex>` user (role `staff`, random
     password that is never stored or shown), reachable only through the SQLi views.
   - **EX-05**: a one-page PDF indexed by the upload pipeline with
-    `access_level=private`; retrieval returns it only to the `admin` role.
+    `access_level=private`; retrieval returns it only to the `admin` role. Its
+    plaintext is kept in `lab_secrets`, so the document can be rebuilt.
 - The output JSON lists the new flag values under `created`. **They are printed
   only once**: store them for grading and never share them with students.
-- Repeating the command creates only missing flags and prints nothing for
-  existing ones. The private PDF is indexed before any database write; if
-  indexing fails, the database is not changed.
+- Flags are committed first; the private PDF is indexed only afterwards, so the
+  vector store never holds a flag the database does not know. If indexing fails,
+  the new values are still printed and the exit code is nonzero: repeat the
+  command. Every run replaces the lab's private PDF (old chunks removed first)
+  instead of adding a copy.
+- Repeating the command creates only missing flags and prints no values for
+  existing ones. A PostgreSQL advisory lock serializes concurrent runs, including
+  the indexing.
 - Missing tables (`lab_secrets` on older databases) are created; existing ones
   are not migrated.
 

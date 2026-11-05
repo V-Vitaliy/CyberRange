@@ -1,8 +1,9 @@
 """Per-lab exercise flags (EX-03, EX-04, EX-05); run once per lab by scripts/seed_exercises.py."""
 
+import asyncio
 import secrets
 import uuid
-from collections.abc import Awaitable, Callable
+from typing import Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,13 +12,20 @@ from app.chat.service import add_seeded_thread
 from app.ctf.service import register_flag
 from app.db.ids import ensure_uuid
 from app.labs.repository import LabSecretRepository
-from app.labs.service import get_session_for_lab
+from app.labs.service import get_exercise_secret, get_session_for_lab
 
 REWARDS = {"EX-03": 30, "EX-04": 20, "EX-05": 20}
 PRIVATE_PDF_NAME = "staff_handbook_confidential.pdf"
 
-# (content, filename, lab_instance_id) -> number of indexed chunks
-PdfIndexer = Callable[[bytes, str, uuid.UUID], Awaitable[int]]
+# Exercises whose plaintext the lab needs after seeding: EX-03 for the assistant's
+# context, EX-05 to rebuild its private document if indexing has to be repeated.
+RUNTIME_SECRETS = {"EX-03", "EX-05"}
+
+
+class PrivateDocuments(Protocol):
+    async def remove(self, lab_instance_id: uuid.UUID, source: str) -> None: ...
+
+    async def index(self, content: bytes, source: str, lab_instance_id: uuid.UUID) -> int: ...
 
 
 class SeedError(Exception):
@@ -55,50 +63,53 @@ def build_private_pdf(lines: list[str]) -> bytes:
     return bytes(pdf)
 
 
-def private_pdf_indexer(etl_worker, redis) -> PdfIndexer:
+class PrivatePdfIndex:
     """Index through the upload pipeline, but only for the admin role (access_level=private)."""
 
-    async def index(content: bytes, filename: str, lab_instance_id: uuid.UUID) -> int:
-        return await etl_worker.process_pdf(
+    def __init__(self, etl_worker, vector_store, redis):
+        self.etl_worker, self.vector_store, self.redis = etl_worker, vector_store, redis
+
+    async def remove(self, lab_instance_id: uuid.UUID, source: str) -> None:
+        where = {"$and": [{"lab_instance_id": str(lab_instance_id)}, {"source": source}]}
+        await asyncio.to_thread(self.vector_store.delete_documents, where)
+
+    async def index(self, content: bytes, source: str, lab_instance_id: uuid.UUID) -> int:
+        return await self.etl_worker.process_pdf(
             file_content=content,
-            filename=filename,
+            filename=source,
             task_id=uuid.uuid4(),
-            redis=redis,
+            redis=self.redis,
             lab_instance_id=lab_instance_id,
             access_level="private",
         )
 
-    return index
 
-
-async def seed_exercise_flags(db: AsyncSession, lab_instance_id, index_private_pdf: PdfIndexer) -> dict[str, str]:
+async def seed_exercise_flags(db: AsyncSession, lab_instance_id) -> dict[str, str]:
     """
     Create the lab's missing exercise flags inside the caller's transaction.
 
     Returns the plaintext of the flags created now, so the instructor sees each value once;
-    exercises seeded earlier are skipped and not returned.
+    exercises seeded earlier are skipped and not returned. The EX-05 document is indexed
+    separately, after commit, by index_private_document.
     """
     lab = ensure_uuid(lab_instance_id)
     session = await get_session_for_lab(db, lab)
     if session is None:
         raise SeedError("The lab has no game session; run admin_setup first.")
-    missing = [exercise for exercise in REWARDS if exercise not in await LabSecretRepository.exercises_for_lab(db, lab)]
-    flags = {exercise: new_flag() for exercise in missing}
-
-    # Index first: if Chroma or the model fails, no flag without its document is written.
-    if "EX-05" in flags:
-        lines = ["Staff handbook (confidential).", "Internal access code:", flags["EX-05"]]
-        if not await index_private_pdf(build_private_pdf(lines), PRIVATE_PDF_NAME, lab):
-            raise SeedError("The private document was not indexed; nothing was written.")
+    seeded = await LabSecretRepository.exercises_for_lab(db, lab)
+    flags = {exercise: new_flag() for exercise in REWARDS if exercise not in seeded}
 
     for exercise, value in flags.items():
         flag = await register_flag(db, lab, value, REWARDS[exercise])
-        # Only EX-03 needs the plaintext at runtime (the assistant's context).
         LabSecretRepository.add(
-            db, lab_instance_id=lab, exercise=exercise, flag_id=flag.id, value=value if exercise == "EX-03" else None
+            db,
+            lab_instance_id=lab,
+            exercise=exercise,
+            flag_id=flag.id,
+            value=value if exercise in RUNTIME_SECRETS else None,
         )
         if exercise == "EX-04":
-            staff = await get_or_create_hidden_user(db, f"staff_{lab.hex[:8]}", "staff", lab)
+            staff = await get_or_create_hidden_user(db, f"staff_{lab.hex}", "staff", lab)
             await add_seeded_thread(
                 db,
                 staff.id,
@@ -111,3 +122,21 @@ async def seed_exercise_flags(db: AsyncSession, lab_instance_id, index_private_p
             )
     await db.flush()
     return flags
+
+
+async def index_private_document(db: AsyncSession, lab_instance_id, documents: PrivateDocuments) -> int:
+    """
+    (Re)index the EX-05 document from the committed flag. The document has a stable
+    identity (lab, file name): old chunks are removed first, so repeating is safe and
+    the index never holds a flag the database does not know.
+    """
+    lab = ensure_uuid(lab_instance_id)
+    value = await get_exercise_secret(db, lab, "EX-05")
+    if value is None:
+        raise SeedError("The lab has no committed EX-05 flag; run the seed first.")
+    await documents.remove(lab, PRIVATE_PDF_NAME)
+    lines = ["Staff handbook (confidential).", "Internal access code:", value]
+    chunks = await documents.index(build_private_pdf(lines), PRIVATE_PDF_NAME, lab)
+    if not chunks:
+        raise SeedError("The private document was not indexed; the flags are saved, repeat the command.")
+    return chunks
