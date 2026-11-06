@@ -11,12 +11,14 @@ from sqlalchemy import select
 from app.agents.soc_agent import AnalysisOutput
 from app.db.database import async_session
 from app.db.models import GameSession, SecurityAuditLog
+from app.siem.forensics import RULE_JUDGED_EVENTS, analyzer
 
 logger = logging.getLogger(__name__)
 
 SOC_BATCH_SIZE = 5
 SOC_POLL_SECONDS = 5
 SOC_MAX_BACKOFF_SECONDS = 60
+SOC_RULE_BATCH_SIZE = 500
 
 
 NETWORK_ERRORS = (
@@ -48,11 +50,45 @@ async def fetch_pending_logs() -> list[tuple[UUID, str, dict]]:
         result = await db.execute(
             select(SecurityAuditLog.id, SecurityAuditLog.event_type, SecurityAuditLog.payload)
             .join(GameSession, SecurityAuditLog.lab_instance_id == GameSession.lab_instance_id)
-            .where(SecurityAuditLog.investigated_at.is_(None), GameSession.is_solo.is_(True))
+            .where(
+                SecurityAuditLog.investigated_at.is_(None),
+                GameSession.is_solo.is_(True),
+                SecurityAuditLog.event_type.notin_(RULE_JUDGED_EVENTS),
+            )
             .order_by(SecurityAuditLog.timestamp)
             .limit(SOC_BATCH_SIZE)
         )
         return [tuple(row) for row in result.all()]
+
+
+async def close_rule_judged_logs() -> int:
+    """Give pending solo-lab events of RULE_JUDGED_EVENTS their rule verdict in one short transaction.
+
+    No model call: a login burst cannot queue model work or delay the analysis of other events.
+    """
+    async with async_session() as db:
+        result = await db.execute(
+            select(SecurityAuditLog)
+            .join(GameSession, SecurityAuditLog.lab_instance_id == GameSession.lab_instance_id)
+            .where(
+                SecurityAuditLog.investigated_at.is_(None),
+                GameSession.is_solo.is_(True),
+                SecurityAuditLog.event_type.in_(RULE_JUDGED_EVENTS),
+            )
+            .order_by(SecurityAuditLog.timestamp)
+            .limit(SOC_RULE_BATCH_SIZE)
+            .with_for_update(of=SecurityAuditLog, skip_locked=True)
+        )
+        logs = result.scalars().all()
+        now = datetime.now(timezone.utc)
+        for log in logs:
+            malicious = analyzer.predict_is_malicious(log.payload, log.event_type)
+            log.investigated_at = now
+            log.is_compromised = malicious
+            verdict = "malicious" if malicious else "benign"
+            log.payload = {**(log.payload or {}), "soc_reasoning": f"Rule-based verdict: {verdict} (no model call)."}
+        await db.commit()
+        return len(logs)
 
 
 async def save_verdict(log_id: UUID, verdict: AnalysisOutput) -> bool:
@@ -85,6 +121,13 @@ async def run_soc_analyst_loop(soc_graph, queue):
 
     while True:
         outage = False
+        try:
+            closed = await close_rule_judged_logs()
+            if closed:
+                logger.info("[SOC Worker] %s rule-judged events closed without the model", closed)
+        except Exception:
+            # The model analysis below does not depend on this step.
+            logger.exception("[SOC Worker] Rule-based verdicts failed; retrying on the next poll")
         try:
             for log_id, event_type, payload in await fetch_pending_logs():
                 initial_state = {

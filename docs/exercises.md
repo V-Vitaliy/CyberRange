@@ -12,6 +12,8 @@ or the classic OWASP Top 10.
   instead of using it.
 - The Red Team works through the API (`/api/red/docs`), the Blue Team through the
   dashboard and `/api/blue/docs`.
+- Log in with the lab code you receive together with your username and password
+  (`lab_code` in the login request); accounts exist only inside their lab.
 - Every Red Team action is logged in the lab's SIEM. Blue Team analysts see it.
 
 ## Exercises
@@ -24,7 +26,7 @@ or the classic OWASP Top 10.
 | EX-04 | Read other users' conversations | A03 | none yet | Playable |
 | EX-05 | Read restricted documents | A01, A07 | JWT Strict Mode | Playable |
 | EX-06 | Exhaust the shared model | LLM10 | Rate Limiter | Playable |
-| EX-07 | Find valid accounts | A07 | none yet | Partial |
+| EX-07 | Find valid accounts | A07 | Login Hardening | Playable |
 
 **Status:** `Playable`: complete; `Partial`: solvable, but not yet scored by a flag
 or not yet visible to the Blue Team; `Planned`: not implemented.
@@ -72,6 +74,10 @@ or not yet visible to the Blue Team; `Planned`: not implemented.
 - **Objective:** find out which usernames exist without knowing any password.
 - **Where:** `POST /api/red/login`, `POST /api/blue/login`.
 - **Hint:** the response body is the same in both cases. Something else is not.
+- **Success:** name every account of your lab, Red and Blue, and show how you
+  told them apart from names that do not exist. Your instructor checks the list.
+- **Note:** the Blue Team sees failed logins; many different usernames failing
+  from one source look like an attack.
 
 ## Blue Team
 
@@ -88,6 +94,7 @@ or not yet visible to the Blue Team; `Planned`: not implemented.
 | JWT Strict Mode | 2 |
 | Rate Limiter | 3 |
 | Reranker | 4 |
+| Login Hardening | 2 |
 
 ## Flags
 

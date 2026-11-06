@@ -24,7 +24,7 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
     async def test_setup_login_preservation_and_atomic_failures(self):
         # Set before importing application settings; never fall back to .env.
         os.environ["DATABASE_URL"] = TEST_URL
-        os.environ["JWT_SECRET"] = secrets.token_urlsafe(48)
+        os.environ.setdefault("JWT_SECRET", secrets.token_urlsafe(48))
         sys.path.insert(0, str(ROOT / "backend"))
         sys.path.insert(0, str(ROOT))
         import httpx
@@ -38,6 +38,7 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
         from app.db.database import Base
         from app.db.database import engine as app_engine
         from app.db.models import ChatThread, GameSession, SecurityAuditLog, User
+        from app.labs.service import lab_from_login_code, lab_login_code
         from app.main import app
         from scripts.admin_setup import Options, SqlStore, seed_transaction
 
@@ -187,11 +188,18 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
 
             # Exercise actual mounted HTTP routes, auth dependencies and DB repositories.
             # ASGITransport does not run lifespan: no Redis/Chroma/LLM startup.
+            # `first` is the report of the real CLI (main -> run_setup, not seed_transaction alone),
+            # which hands out the lab's login code with the credentials.
+            self.assertEqual(lab_from_login_code(first["lab_code"]), lab_id)
+
+            def credentials(name, password, code=first["lab_code"]):
+                return {"username": name, "password": password, "lab_code": code}
+
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app), base_url="http://integration"
             ) as client:
                 for side, name, password in (("red", red_name, red_password), ("blue", blue_name, blue_password)):
-                    response = await client.post(f"/api/{side}/login", json={"username": name, "password": password})
+                    response = await client.post(f"/api/{side}/login", json=credentials(name, password))
                     self.assertEqual(response.status_code, 200, "Real login failed")
                     token = response.json()["access_token"]
                     claims = jwt.decode(token, os.environ["JWT_SECRET"], algorithms=["HS256"])
@@ -209,11 +217,19 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
                         profile = await client.get("/api/blue/me", headers={"Authorization": "Bearer " + token})
                         self.assertEqual(profile.status_code, 200)
                         self.assertEqual(profile.json()["session_id"], first["session_id"])
-                    bad = await client.post(f"/api/{side}/login", json={"username": name, "password": "incorrect"})
+                    bad = await client.post(f"/api/{side}/login", json=credentials(name, "incorrect"))
                     self.assertEqual(bad.status_code, 401)
                 for side, name, password in (("red", blue_name, blue_password), ("blue", red_name, red_password)):
-                    denied = await client.post(f"/api/{side}/login", json={"username": name, "password": password})
+                    denied = await client.post(f"/api/{side}/login", json=credentials(name, password))
                     self.assertEqual(denied.status_code, 403)
+                unknown = await client.post("/api/red/login", json=credentials(prefix + "_nobody", "x"))
+                self.assertEqual(unknown.status_code, 401)
+                # A real username and password in another lab are unknown there; nothing is logged.
+                foreign = credentials(red_name, red_password, lab_login_code(uuid4()))
+                self.assertEqual((await client.post("/api/red/login", json=foreign)).status_code, 401)
+                # The bare lab ID (visible to students through the SQLi exercise) is not a login code.
+                bare = credentials(prefix + "_probe", "x", str(lab_id))
+                self.assertEqual((await client.post("/api/red/login", json=bare)).status_code, 401)
             async with db_factory() as db:
                 events = (
                     (
@@ -228,6 +244,29 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
                     .all()
                 )
                 self.assertEqual(len(events), 1, "Red login audit was not persisted")
+                failed = (
+                    (
+                        await db.execute(
+                            select(SecurityAuditLog)
+                            .where(
+                                SecurityAuditLog.lab_instance_id == lab_id,
+                                SecurityAuditLog.event_type == "LOGIN_FAILED",
+                            )
+                            .order_by(SecurityAuditLog.timestamp)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                # The distinct-username count runs as real JSONB SQL against this lab and source only.
+                self.assertEqual(
+                    [
+                        (e.payload["username"], e.payload["failed_usernames_from_source"], "reason" in e.payload)
+                        for e in failed
+                    ],
+                    [(red_name, 1, False), (blue_name, 2, False), (prefix + "_nobody", 3, False)],
+                )
+                self.assertTrue(all("incorrect" not in str(e.payload) for e in failed))
 
             # Every CLI conflict must leave all rows unchanged, including unrelated labs.
             for kwargs in (
@@ -295,6 +334,135 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await engine.dispose()
             await app_engine.dispose()
+
+    async def test_concurrent_failed_logins_do_not_starve_the_connection_pool(self):
+        """Each failed login must not hold its request connection while waiting for the event's one."""
+        os.environ["DATABASE_URL"] = TEST_URL
+        os.environ.setdefault("JWT_SECRET", secrets.token_urlsafe(48))
+        sys.path.insert(0, str(ROOT / "backend"))
+        from unittest.mock import patch
+
+        import httpx
+        from sqlalchemy import select, text
+        from sqlalchemy.engine import make_url
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+        from app.db import database
+        from app.db.models import GameSession, SecurityAuditLog
+        from app.labs.service import lab_login_code
+        from app.main import app
+        from app.siem import service as siem
+
+        url = make_url(TEST_URL)
+        self.assertEqual(url.database, TEST_DATABASE, "Test database confirmation mismatch")
+        # Two connections: two failed logins that each hold one and wait for another would stall.
+        small = create_async_engine(url, hide_parameters=True, pool_size=2, max_overflow=0, pool_timeout=5)
+        sessions = async_sessionmaker(small, class_=AsyncSession, expire_on_commit=False, autoflush=False)
+        lab = uuid4()
+        try:
+            async with small.begin() as conn:
+                self.assertEqual(await conn.scalar(text("SELECT current_database()")), TEST_DATABASE)
+                await conn.run_sync(database.Base.metadata.create_all)
+            async with sessions() as db:
+                db.add(GameSession(id=uuid4(), team_id=uuid4(), lab_instance_id=lab, is_solo=False))
+                await db.commit()
+            body = {"password": "x", "lab_code": lab_login_code(lab)}
+            with patch.object(database, "async_session", sessions), patch.object(siem, "async_session", sessions):
+                async with httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app), base_url="http://integration"
+                ) as client:
+                    responses = await asyncio.wait_for(
+                        asyncio.gather(
+                            *(client.post("/api/red/login", json={**body, "username": f"nobody{i}"}) for i in range(6))
+                        ),
+                        timeout=30,
+                    )
+            self.assertEqual([r.status_code for r in responses], [401] * 6)
+            async with sessions() as db:
+                rows = (
+                    (
+                        await db.execute(
+                            select(SecurityAuditLog).where(
+                                SecurityAuditLog.lab_instance_id == lab, SecurityAuditLog.event_type == "LOGIN_FAILED"
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+            self.assertEqual(sorted(r.payload["failed_usernames_from_source"] for r in rows), [1, 2, 3, 4, 5, 6])
+        finally:
+            await small.dispose()
+
+    async def test_first_blocked_login_is_logged_without_waiting_for_a_connection(self):
+        """With one connection, the LOGIN_RATE_LIMITED write must not wait for the request's own one."""
+        os.environ["DATABASE_URL"] = TEST_URL
+        os.environ.setdefault("JWT_SECRET", secrets.token_urlsafe(48))
+        sys.path.insert(0, str(ROOT / "backend"))
+        import time
+        from unittest.mock import patch
+
+        import httpx
+        from sqlalchemy import select, text
+        from sqlalchemy.engine import make_url
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+        from app.auth import service as auth_service
+        from app.db import database
+        from app.db.models import GameSession, SecurityAuditLog
+        from app.defense.service import LOGIN_ATTEMPTS_PER_MINUTE
+        from app.labs.service import lab_login_code
+        from app.main import app
+        from app.siem import service as siem
+        from tests.unit.test_defense import CountingRedis
+
+        url = make_url(TEST_URL)
+        self.assertEqual(url.database, TEST_DATABASE, "Test database confirmation mismatch")
+        single = create_async_engine(url, hide_parameters=True, pool_size=1, max_overflow=0, pool_timeout=5)
+        sessions = async_sessionmaker(single, class_=AsyncSession, expire_on_commit=False, autoflush=False)
+        lab = uuid4()
+        try:
+            async with single.begin() as conn:
+                self.assertEqual(await conn.scalar(text("SELECT current_database()")), TEST_DATABASE)
+                await conn.run_sync(database.Base.metadata.create_all)
+            async with sessions() as db:
+                db.add(
+                    GameSession(
+                        id=uuid4(), team_id=uuid4(), lab_instance_id=lab, is_solo=False, login_hardening_enabled=True
+                    )
+                )
+                await db.commit()
+            body = {"username": "nobody_" + uuid4().hex, "password": "x", "lab_code": lab_login_code(lab)}
+            # Redis is not part of this job; the counter double stands in for it.
+            with (
+                patch.object(database, "async_session", sessions),
+                patch.object(siem, "async_session", sessions),
+                patch.object(auth_service, "redis_client", CountingRedis()),
+            ):
+                async with httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app), base_url="http://integration"
+                ) as client:
+                    for _ in range(LOGIN_ATTEMPTS_PER_MINUTE):
+                        self.assertEqual((await client.post("/api/red/login", json=body)).status_code, 401)
+                    started = time.monotonic()
+                    blocked = await client.post("/api/red/login", json=body)
+                    elapsed = time.monotonic() - started
+            self.assertEqual(blocked.status_code, 429)
+            self.assertLess(elapsed, 4, "the blocked attempt waited for a pool connection")
+            async with sessions() as db:
+                events = (
+                    (
+                        await db.execute(
+                            select(SecurityAuditLog.event_type).where(SecurityAuditLog.lab_instance_id == lab)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+            self.assertEqual(sorted(set(events)), ["LOGIN_FAILED", "LOGIN_RATE_LIMITED"])
+            self.assertEqual(events.count("LOGIN_RATE_LIMITED"), 1)
+        finally:
+            await single.dispose()
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from app.agents.soc_agent import create_soc_graph
 from app.auth.router import blue_router as blue_auth_router
 from app.auth.router import red_router as red_auth_router
+from app.auth.service import dummy_password_hash
 from app.chat.router import router as chat_router
 from app.core.config import require_strong_jwt_secret, settings
 from app.core.queue_manager import LLMQueueManager
@@ -46,6 +47,8 @@ blue_app.include_router(siem_router, prefix="")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     require_strong_jwt_secret(settings.JWT_SECRET)
+    # Built once off the loop, so Login Hardening is constant-time from the first request.
+    await asyncio.to_thread(dummy_password_hash)
     queue_manager = LLMQueueManager()
     vector_store = VectorStore()
     object_store = ObjectStore.from_settings()

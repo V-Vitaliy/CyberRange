@@ -16,6 +16,14 @@ from app.siem import soc_worker
 from tests.openai_doubles import assert_request, make_model
 
 
+@pytest.fixture(autouse=True)
+def rule_closing(monkeypatch):
+    """Loop tests run without a database: the rule step is stubbed; the real one is returned."""
+    real = getattr(soc_worker, "close_rule_judged_logs", None)
+    monkeypatch.setattr(soc_worker, "close_rule_judged_logs", AsyncMock(return_value=0), raising=False)
+    return real
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("malicious", [False, True])
 async def test_soc_returns_successful_verdict(malicious):
@@ -243,3 +251,58 @@ async def test_soc_outage_mid_batch_keeps_saved_verdicts_and_stops_batch(monkeyp
     assert graph.ainvoke.await_count == 2
     save.assert_awaited_once_with(first, AnalysisOutput(is_malicious=False, reasoning="normal"))
     assert soc_worker.asyncio.sleep.await_args.args[0] == 5
+
+
+def audit_log(event_type, payload):
+    return SecurityAuditLog(id=uuid4(), event_type=event_type, payload=payload, is_compromised=False)
+
+
+@pytest.mark.asyncio
+async def test_rule_judged_events_are_closed_by_the_forensics_rule(monkeypatch, rule_closing):
+    burst = audit_log("LOGIN_FAILED", {"username": "a", "failed_usernames_from_source": 5})
+    single = audit_log("LOGIN_FAILED", {"username": "b", "failed_usernames_from_source": 1})
+    blocked = audit_log("LOGIN_RATE_LIMITED", {"limit": 10})
+    rows = Mock(scalars=Mock(return_value=Mock(all=Mock(return_value=[burst, single, blocked]))))
+    db = SimpleNamespace(execute=AsyncMock(return_value=rows), commit=AsyncMock())
+
+    @asynccontextmanager
+    async def session():
+        yield db
+
+    monkeypatch.setattr(soc_worker, "async_session", session)
+    assert await rule_closing() == 3
+    assert [log.is_compromised for log in (burst, single, blocked)] == [True, False, True]
+    for log in (burst, single, blocked):
+        assert log.investigated_at is not None
+        assert log.payload["soc_reasoning"].startswith("Rule-based verdict")
+    assert burst.payload["failed_usernames_from_source"] == 5
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_soc_worker_closes_rule_events_without_the_model(monkeypatch):
+    close = AsyncMock(return_value=3)
+    monkeypatch.setattr(soc_worker, "close_rule_judged_logs", close, raising=False)
+    monkeypatch.setattr(soc_worker, "fetch_pending_logs", AsyncMock(return_value=[]))
+    monkeypatch.setattr(soc_worker.asyncio, "sleep", AsyncMock(side_effect=asyncio.CancelledError))
+    graph = SimpleNamespace(ainvoke=AsyncMock())
+    with pytest.raises(asyncio.CancelledError):
+        await soc_worker.run_soc_analyst_loop(graph, LLMQueueManager())
+    close.assert_awaited_once()
+    graph.ainvoke.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_failed_rule_closing_does_not_stop_model_analysis(monkeypatch):
+    log_id = uuid4()
+    monkeypatch.setattr(
+        soc_worker, "close_rule_judged_logs", AsyncMock(side_effect=RuntimeError("database down")), raising=False
+    )
+    monkeypatch.setattr(soc_worker, "fetch_pending_logs", AsyncMock(return_value=[(log_id, "LLM_PROMPT", {})]))
+    save = AsyncMock(return_value=True)
+    monkeypatch.setattr(soc_worker, "save_verdict", save)
+    monkeypatch.setattr(soc_worker.asyncio, "sleep", AsyncMock(side_effect=asyncio.CancelledError))
+    graph = SimpleNamespace(ainvoke=AsyncMock(return_value={"is_malicious": False, "reasoning": "normal"}))
+    with pytest.raises(asyncio.CancelledError):
+        await soc_worker.run_soc_analyst_loop(graph, LLMQueueManager())
+    save.assert_awaited_once_with(log_id, AnalysisOutput(is_malicious=False, reasoning="normal"))

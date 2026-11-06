@@ -2,7 +2,7 @@
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 # One AUTH_BYPASS_ATTEMPT per user, claimed role and outcome per window (the default token lifetime).
 JWT_FORGERY_LOG_WINDOW_SECONDS = 15 * 60
+# Failed logins from one source are counted over this window (EX-07 detection).
+LOGIN_ENUMERATION_WINDOW = timedelta(minutes=5)
 
 
 async def log_security_event(
@@ -28,29 +30,29 @@ async def log_security_event(
     so the Blue Team can monitor and investigate them.
     The event is written in its own session: it never commits or rolls back the caller's transaction.
     """
-    if "source_ip" not in payload:
-        payload["source_ip"] = source_ip
-
     async with async_session() as db:
-        try:
-            # Create a new audit log record
-            new_event = SecurityAuditLog(
-                lab_instance_id=lab_instance_id,
-                timestamp=datetime.utcnow(),
-                event_type=event_type,
-                payload=payload,
-            )
+        return await _write_event(db, lab_instance_id, event_type, payload, source_ip)
 
-            db.add(new_event)
-            await db.commit()
-            await db.refresh(new_event)
 
-            return new_event
-
-        except Exception as e:
-            await db.rollback()
-            logger.error(f"SIEM Logger failed to record event '{event_type}': {str(e)}")
-            return None
+async def _write_event(
+    db: AsyncSession, lab_instance_id: str, event_type: str, payload: Dict[str, Any], source_ip: str
+) -> Optional[SecurityAuditLog]:
+    payload.setdefault("source_ip", source_ip)
+    try:
+        new_event = SecurityAuditLog(
+            lab_instance_id=lab_instance_id,
+            timestamp=datetime.utcnow(),
+            event_type=event_type,
+            payload=payload,
+        )
+        db.add(new_event)
+        await db.commit()
+        await db.refresh(new_event)
+        return new_event
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"SIEM Logger failed to record event '{event_type}': {str(e)}")
+        return None
 
 
 async def log_jwt_manipulation_attempt(
@@ -88,6 +90,28 @@ async def log_jwt_manipulation_attempt(
     return event
 
 
+async def log_failed_login(*, lab_instance_id: str, username: str, source_ip: str, portal: str):
+    """LOGIN_FAILED with the number of distinct usernames that recently failed from this source.
+
+    Neither the password nor the failure reason is recorded: the reason would tell
+    whether the username exists.
+    """
+    since = datetime.now(timezone.utc) - LOGIN_ENUMERATION_WINDOW
+    async with async_session() as db:
+        try:
+            # Counting and writing share one transaction locked per lab and source, so concurrent
+            # failures from one source wait for each other and every count includes the earlier ones.
+            await AuditLogRepository.lock_failed_login_source(db, lab_instance_id, source_ip)
+            seen = await AuditLogRepository.recent_failed_login_usernames(db, lab_instance_id, source_ip, since)
+            count = len(set(seen) | {username})
+        except Exception:
+            logger.warning("Could not count recent failed logins; logging the attempt without the count")
+            await db.rollback()
+            count = None
+        payload = {"username": username, "portal": portal, "failed_usernames_from_source": count}
+        return await _write_event(db, lab_instance_id, "LOGIN_FAILED", payload, source_ip)
+
+
 async def get_dashboard_stats(db: AsyncSession, game_session: GameSession) -> DashboardStatsResponse:
     """Aggregates metrics for the Blue Team React Dashboard (KPI cards)."""
     active_defenses = {
@@ -95,6 +119,7 @@ async def get_dashboard_stats(db: AsyncSession, game_session: GameSession) -> Da
         "rate_limit_enabled": game_session.rate_limit_enabled,
         "reranker_enabled": game_session.use_reranker,
         "jwt_filter_enabled": game_session.jwt_filter_enabled,
+        "login_hardening_enabled": game_session.login_hardening_enabled,
     }
 
     stats = await AuditLogRepository.get_stats(db, game_session.lab_instance_id)

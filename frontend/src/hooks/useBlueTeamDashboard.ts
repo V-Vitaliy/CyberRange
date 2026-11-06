@@ -7,7 +7,8 @@ const initialDefenses: DefenseOption[] = [
   { id: 'rate_limit', name: 'Rate Limiter', cost: 3, enabled: false, description: 'Blocks DoS attacks.' },
   { id: 'reranker', name: 'Reranker', cost: 4, enabled: false, description: 'Filters malicious context.' },
   { id: 'prompt_hardening', name: 'Prompt Patch', cost: 2, enabled: false, description: 'System prompt security.' },
-  { id: 'jwt_filter', name: 'JWT Strict Mode', cost: 2, enabled: false, description: 'Enforces signature validation.' }
+  { id: 'jwt_filter', name: 'JWT Strict Mode', cost: 2, enabled: false, description: 'Enforces signature validation.' },
+  { id: 'login_hardening', name: 'Login Hardening', cost: 2, enabled: false, description: 'Constant-time login and attempt limit.' }
 ];
 
 export function useBlueTeamDashboard(requestedSessionId: string | null) {
@@ -43,13 +44,13 @@ export function useBlueTeamDashboard(requestedSessionId: string | null) {
     setError(err instanceof Error ? err.message : 'Request failed');
   }, [logout]);
 
-  const login = async (username: string, password: string) => {
+  const login = async (username: string, password: string, labCode: string) => {
     setLoading(true);
     setError('');
     try {
       const data = await requestJson<{ access_token: string }>(`${API_BASE}/login`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify({ username, password, lab_code: labCode })
       });
       identity.current += 1;
       setToken(data.access_token);

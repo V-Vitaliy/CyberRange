@@ -1,6 +1,6 @@
 from datetime import timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import ANY, AsyncMock, Mock
 from uuid import uuid4
 
 import jwt
@@ -141,29 +141,158 @@ async def test_buying_jwt_defense_blocks_previously_accepted_forgery(identity, m
     session.system_prompt = "You are a helpful university assistant."
     session.rate_limit_enabled = False
     session.use_reranker = False
+    session.login_hardening_enabled = False
     await defense.process_defense_purchase(SimpleNamespace(commit=AsyncMock()), session.id, "jwt_filter")
     with pytest.raises(HTTPException):
         await service.get_current_user_vulnerable(f"Bearer {forged}", object())
     assert (await service.get_current_user_vulnerable(f"Bearer {genuine}", object()))["role"] == "red_team"
 
 
+LAB, OTHER_LAB = uuid4(), uuid4()
+STORED_HASH = service.get_password_hash("correct-password")
+
+
 @pytest.fixture
-def stored_user(monkeypatch):
-    user = SimpleNamespace(username="student", password_hash=service.get_password_hash("correct-password"))
-    lookup = AsyncMock(side_effect=lambda db, username: user if username == user.username else None)
-    monkeypatch.setattr(UserRepository, "get_by_username", lookup)
-    return user
+def login_lab(monkeypatch):
+    """Two labs; only LAB has the user "student". Password checks and SIEM writes are recorded."""
+    user = SimpleNamespace(username="student", lab_instance_id=LAB, password_hash=STORED_HASH)
+    sessions = {lab: SimpleNamespace(lab_instance_id=lab, login_hardening_enabled=False) for lab in (LAB, OTHER_LAB)}
+    users = AsyncMock(side_effect=lambda db, name, lab: user if (name, lab) == ("student", LAB) else None)
+    monkeypatch.setattr(UserRepository, "get_by_username_in_lab", users, raising=False)
+    monkeypatch.setattr(
+        GameSessionRepository, "get_by_lab_instance_id", AsyncMock(side_effect=lambda db, lab: sessions.get(lab))
+    )
+    checked = []
+    real_verify = service.verify_password
+
+    def verify(plain, hashed):
+        checked.append(hashed)
+        return real_verify(plain, hashed)
+
+    monkeypatch.setattr(service, "verify_password", verify)
+    monkeypatch.setattr(service, "log_failed_login", AsyncMock(), raising=False)
+    monkeypatch.setattr(service, "enforce_login_attempt_limit", AsyncMock(), raising=False)
+    return SimpleNamespace(
+        user=user,
+        session=sessions[LAB],
+        users=users,
+        checked=checked,
+        failed=service.log_failed_login,
+        limit=service.enforce_login_attempt_limit,
+    )
 
 
-@pytest.mark.asyncio
-async def test_authenticate_returns_user_for_correct_password(stored_user):
-    assert await service.authenticate(object(), "student", "correct-password") is stored_user
+async def login(username="student", password="correct-password", lab=LAB, db=None):
+    db = db or SimpleNamespace(rollback=AsyncMock())
+    return await service.authenticate(db, username, password, lab, source_ip="203.0.113.9", portal="red")
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("username,password", [("student", "wrong-password"), ("nobody", "correct-password")])
-async def test_authenticate_rejects_wrong_password_or_unknown_user(stored_user, username, password):
-    assert await service.authenticate(object(), username, password) is None
+async def test_failed_login_releases_the_request_connection_before_logging(login_lab, username, password):
+    """The event write needs its own connection: holding both lets a burst of failures starve the pool."""
+    db = SimpleNamespace(rollback=AsyncMock())
+
+    async def logged(**event):
+        assert db.rollback.await_count == 1, "the request transaction is still open"
+
+    login_lab.failed.side_effect = logged
+    assert await login(username, password, db=db) is None
+    login_lab.failed.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_successful_login_keeps_the_request_transaction(login_lab):
+    db = SimpleNamespace(rollback=AsyncMock())
+    assert await login(db=db) is login_lab.user
+    db.rollback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_login_returns_the_user_of_the_requested_lab(login_lab):
+    assert await login() is login_lab.user
+    login_lab.users.assert_awaited_once_with(ANY, "student", LAB)
+    login_lab.failed.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "username,password,lab",
+    [
+        ("student", "wrong-password", LAB),
+        ("nobody", "correct-password", LAB),
+        # Usernames are looked up inside the requested lab only.
+        ("student", "correct-password", OTHER_LAB),
+    ],
+)
+async def test_failed_login_is_logged_in_the_requested_lab_without_the_password(login_lab, username, password, lab):
+    assert await login(username, password, lab) is None
+    # No reason is recorded: it would tell whether the username exists.
+    login_lab.failed.assert_awaited_once_with(
+        lab_instance_id=str(lab), username=username, source_ip="203.0.113.9", portal="red"
+    )
+    assert password not in repr(login_lab.failed.call_args)
+
+
+@pytest.mark.asyncio
+async def test_unknown_lab_fails_without_event_or_password_check(login_lab):
+    assert await login(lab=uuid4()) is None
+    login_lab.failed.assert_not_awaited()
+    login_lab.limit.assert_not_awaited()
+    assert login_lab.checked == []
+
+
+@pytest.mark.asyncio
+async def test_without_hardening_only_known_users_reach_bcrypt(login_lab):
+    """The EX-07 timing difference stays until the Blue Team buys Login Hardening."""
+    await login("nobody")
+    assert login_lab.checked == []
+    await login("student", "wrong-password")
+    assert login_lab.checked == [STORED_HASH]
+    login_lab.limit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_hardening_checks_unknown_users_against_a_dummy_hash(login_lab):
+    login_lab.session.login_hardening_enabled = True
+    assert await login("nobody") is None
+    assert login_lab.checked == [service.dummy_password_hash()]
+    login_lab.failed.assert_awaited_once()
+    assert await login() is login_lab.user
+    assert login_lab.checked[-1] == STORED_HASH
+
+
+def test_dummy_hash_costs_as_much_as_a_real_hash():
+    dummy = service.dummy_password_hash()
+    assert dummy.split("$")[2] == STORED_HASH.split("$")[2]  # bcrypt cost factor
+    assert service.dummy_password_hash() == dummy  # computed once, not per request
+
+
+@pytest.mark.asyncio
+async def test_hardening_limits_attempts_before_any_lookup(login_lab):
+    login_lab.session.login_hardening_enabled = True
+    login_lab.limit.side_effect = HTTPException(status_code=429, detail="Too many login attempts")
+    with pytest.raises(HTTPException) as exc:
+        await login()
+    assert exc.value.status_code == 429
+    login_lab.limit.assert_awaited_once_with(service.redis_client, LAB, "203.0.113.9")
+    login_lab.users.assert_not_awaited()
+    login_lab.failed.assert_not_awaited()
+    assert login_lab.checked == []
+
+
+@pytest.mark.asyncio
+async def test_hardened_login_releases_the_request_connection_before_the_limiter(login_lab):
+    """The limiter writes LOGIN_RATE_LIMITED on its own connection when it blocks a source."""
+    login_lab.session.login_hardening_enabled = True
+    db = SimpleNamespace(rollback=AsyncMock())
+
+    async def limit(redis, lab, source_ip):
+        assert db.rollback.await_count == 1, "the request transaction is still open"
+
+    login_lab.limit.side_effect = limit
+    assert await login(db=db) is login_lab.user
+    login_lab.limit.assert_awaited_once()
 
 
 def test_auth_routers_hold_login_and_blue_profile():

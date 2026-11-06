@@ -1,6 +1,7 @@
 """Defense shop for the Blue Team and the rate limit it can switch on."""
 
 import logging
+import time
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -19,7 +20,10 @@ DEFENSE_PRICING = {
     "jwt_filter": 2,  # Strengthening JWT filters (blocking alg: none)
     "rate_limit": 3,  # Enabling Redis Rate Limiting
     "reranker": 4,  # Enabling Cross-Encoder Reranker
+    "login_hardening": 2,  # Constant-time login and a login attempt limit
 }
+
+LOGIN_ATTEMPTS_PER_MINUTE = 10
 
 
 async def process_defense_purchase(db: AsyncSession, session_id: UUID, defense_type: str) -> BuyDefenseResponse:
@@ -50,6 +54,8 @@ async def process_defense_purchase(db: AsyncSession, session_id: UUID, defense_t
         already_owned = True
     elif defense_type == "jwt_filter" and game_session.jwt_filter_enabled:
         already_owned = True
+    elif defense_type == "login_hardening" and game_session.login_hardening_enabled:
+        already_owned = True
 
     if already_owned:
         raise HTTPException(status_code=400, detail=f"Defense '{defense_type}' is already active.")
@@ -71,6 +77,8 @@ async def process_defense_purchase(db: AsyncSession, session_id: UUID, defense_t
         game_session.use_reranker = True
     elif defense_type == "jwt_filter":
         game_session.jwt_filter_enabled = True
+    elif defense_type == "login_hardening":
+        game_session.login_hardening_enabled = True
 
     await db.commit()
 
@@ -83,6 +91,7 @@ async def process_defense_purchase(db: AsyncSession, session_id: UUID, defense_t
             "rate_limit_enabled": game_session.rate_limit_enabled,
             "reranker_enabled": game_session.use_reranker,
             "jwt_filter_enabled": game_session.jwt_filter_enabled,
+            "login_hardening_enabled": game_session.login_hardening_enabled,
         },
     )
 
@@ -121,3 +130,32 @@ async def enforce_rate_limit(db: AsyncSession, redis: Redis, session_id: UUID, c
         raise HTTPException(
             status_code=429, detail="Too Many Requests. The Blue Team's Active WAF has temporarily blocked your IP."
         )
+
+
+async def enforce_login_attempt_limit(redis: Redis, lab_instance_id: UUID, source_ip: str) -> None:
+    """Login Hardening: at most LOGIN_ATTEMPTS_PER_MINUTE login attempts per source in the lab.
+
+    The first blocked attempt of a window is logged. If Redis is down, logins are not limited.
+    """
+    # One key per minute (a fixed window); INCR and EXPIRE apply together, so no counter lacks a TTL.
+    key = f"login_attempts:{lab_instance_id}:{source_ip}:{int(time.time() // 60)}"
+    try:
+        async with redis.pipeline(transaction=True) as pipe:
+            attempts, _ = await pipe.incr(key).expire(key, 60).execute()
+    except Exception:
+        logger.warning("Login attempt limit is unavailable; the attempt is allowed")
+        return
+    if attempts <= LOGIN_ATTEMPTS_PER_MINUTE:
+        return
+    if attempts == LOGIN_ATTEMPTS_PER_MINUTE + 1:
+        await log_security_event(
+            lab_instance_id=str(lab_instance_id),
+            event_type="LOGIN_RATE_LIMITED",
+            payload={
+                "limit": LOGIN_ATTEMPTS_PER_MINUTE,
+                "window_seconds": 60,
+                "description": "Too many login attempts from one source.",
+            },
+            source_ip=source_ip,
+        )
+    raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")

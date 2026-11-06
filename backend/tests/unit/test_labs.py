@@ -63,3 +63,36 @@ async def test_get_session_for_lab_looks_up_by_lab(stored):
     db = object()
     assert await service.get_session_for_lab(db, stored.lab) is stored.session
     stored.by_lab.assert_awaited_once_with(db, stored.lab)
+
+
+def test_lab_login_code_names_its_lab():
+    lab = uuid4()
+    code = service.lab_login_code(lab)
+    assert service.lab_from_login_code(code) == lab
+    assert str(lab) not in code and lab.hex not in code
+
+
+@pytest.mark.parametrize(
+    "forge",
+    [
+        # Lab UUIDs are not secret (the SQLi exercise can list every lab's database role).
+        lambda lab, other: str(other),
+        lambda lab, other: other.hex,
+        # A genuine code with its lab part swapped for another lab.
+        lambda lab, other: service.lab_login_code(other)[:22] + service.lab_login_code(lab)[22:],
+        lambda lab, other: service.lab_login_code(lab)[:-1],
+        lambda lab, other: "",
+        lambda lab, other: "not a code",
+        lambda lab, other: "é" * 43,
+    ],
+)
+def test_forged_or_malformed_login_codes_name_no_lab(forge):
+    lab, other = uuid4(), uuid4()
+    assert service.lab_from_login_code(forge(lab, other)) is None
+
+
+def test_login_codes_depend_on_the_platform_secret(monkeypatch):
+    lab = uuid4()
+    code = service.lab_login_code(lab)
+    monkeypatch.setattr(service.settings, "JWT_SECRET", "another-test-secret-with-at-least-32-bytes")
+    assert service.lab_from_login_code(code) is None

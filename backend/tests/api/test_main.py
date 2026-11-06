@@ -16,6 +16,7 @@ from app.auth.service import create_access_token
 from app.ctf import service as ctf_service
 from app.ctf.repository import CtfRepository
 from app.db.database import get_db
+from app.labs import service as labs_service
 from app.labs.repository import GameSessionRepository
 from app.main import app, blue_app, red_app
 
@@ -55,6 +56,36 @@ async def test_startup_uses_provider_factory_and_cleans_up_soc(monkeypatch):
         assert main.red_app.state.object_store is object_store.from_settings.return_value
     assert cancelled.is_set()
     factory.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_startup_prepares_the_login_dummy_hash_off_the_event_loop(monkeypatch):
+    """Login Hardening is constant-time from the first request: no cold dummy hash to build."""
+    import threading
+
+    from app.auth import service as auth_service
+
+    monkeypatch.setattr(main, "create_llm", Mock())
+    monkeypatch.setattr(main, "create_soc_graph", Mock(side_effect=NotImplementedError))  # no SOC task
+    monkeypatch.setattr(main, "VectorStore", Mock())
+    monkeypatch.setattr(main, "ObjectStore", Mock())
+    threads = []
+    real_hash = auth_service.get_password_hash
+
+    def get_password_hash(password):
+        threads.append(threading.get_ident())
+        return real_hash(password)
+
+    monkeypatch.setattr(auth_service, "get_password_hash", get_password_hash)
+    auth_service.dummy_password_hash.cache_clear()
+    try:
+        async with main.lifespan(main.app):
+            assert len(threads) == 1 and threads[0] != threading.get_ident()
+            dummy = auth_service.dummy_password_hash()
+            assert len(threads) == 1  # served from the cache, not built on the first login
+            assert auth_service.verify_password("guess", dummy) is False
+    finally:
+        auth_service.dummy_password_hash.cache_clear()
 
 
 @pytest.mark.asyncio
@@ -190,7 +221,9 @@ async def test_login_password_check_runs_off_the_event_loop(monkeypatch, side):
     user = SimpleNamespace(
         id=uuid4(), username="test-user", role=side + "_team", lab_instance_id=uuid4(), password_hash="hash"
     )
-    monkeypatch.setattr(UserRepository, "get_by_username", AsyncMock(return_value=user))
+    monkeypatch.setattr(UserRepository, "get_by_username_in_lab", AsyncMock(return_value=user), raising=False)
+    session = SimpleNamespace(lab_instance_id=user.lab_instance_id, login_hardening_enabled=False)
+    monkeypatch.setattr(GameSessionRepository, "get_by_lab_instance_id", AsyncMock(return_value=session))
     threads = []
 
     def verify(plain, hashed):
@@ -208,9 +241,64 @@ async def test_login_password_check_runs_off_the_event_loop(monkeypatch, side):
     sub_app.dependency_overrides[get_db] = database
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-            response = await client.post(f"/api/{side}/login", json={"username": "test-user", "password": "x"})
+            body = {
+                "username": "test-user",
+                "password": "x",
+                "lab_code": labs_service.lab_login_code(user.lab_instance_id),
+            }
+            response = await client.post(f"/api/{side}/login", json=body)
     finally:
         sub_app.dependency_overrides.clear()
         sub_app.dependency_overrides.update(previous)
     assert response.status_code == 200
     assert threads and threads[0] != threading.get_ident()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("side", ["red", "blue"])
+async def test_login_requires_a_lab_code(client, side):
+    response = await client.post(f"/api/{side}/login", json={"username": "test-user", "password": "x"})
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("side", ["red", "blue"])
+@pytest.mark.parametrize("code", ["raw-uuid", "", "not-a-code"])
+async def test_login_rejects_codes_not_issued_by_the_platform(client, monkeypatch, side, code):
+    """A lab UUID is not a credential: a caller who learned another lab's ID cannot probe it."""
+    from app.auth import router as auth_router
+
+    authenticate = AsyncMock(return_value=None)
+    monkeypatch.setattr(auth_router, "authenticate", authenticate)
+    body = {"username": "test-user", "password": "x", "lab_code": str(uuid4()) if code == "raw-uuid" else code}
+    response = await client.post(f"/api/{side}/login", json=body)
+    assert response.status_code == 401
+    assert response.json()["detail"] in ("Invalid credentials", "Incorrect username or password")
+    authenticate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("side", ["red", "blue"])
+async def test_login_passes_lab_source_and_portal_to_authentication(client, monkeypatch, side):
+    from app.auth import router as auth_router
+
+    authenticate = AsyncMock(return_value=None)
+    monkeypatch.setattr(auth_router, "authenticate", authenticate)
+    sub_app = red_app if side == "red" else blue_app
+
+    async def database():
+        yield object()
+
+    previous = dict(sub_app.dependency_overrides)
+    sub_app.dependency_overrides[get_db] = database
+    try:
+        lab = uuid4()
+        body = {"username": "test-user", "password": "x", "lab_code": labs_service.lab_login_code(lab)}
+        response = await client.post(f"/api/{side}/login", json=body)
+    finally:
+        sub_app.dependency_overrides.clear()
+        sub_app.dependency_overrides.update(previous)
+    assert response.status_code == 401
+    authenticate.assert_awaited_once()
+    assert authenticate.call_args.args[1:] == ("test-user", "x", lab)
+    assert authenticate.call_args.kwargs == {"source_ip": "127.0.0.1", "portal": side}

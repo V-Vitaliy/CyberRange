@@ -133,6 +133,13 @@ async def seed_transaction(
         await connection.execute(text("SET LOCAL statement_timeout = '30s'"))
         await connection.execute(text("SELECT pg_advisory_xact_lock(721034, 1)"))
         await connection.run_sync(metadata.create_all)
+        # create_all does not alter existing tables; labs created before LAB-8 lack this column.
+        await connection.execute(
+            text(
+                "ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS "
+                "login_hardening_enabled BOOLEAN NOT NULL DEFAULT FALSE"
+            )
+        )
         async with session_factory(bind=connection, expire_on_commit=False) as db:
             result = await seed(make_store(db), options, password_lookup, hash_password)
     return result  # Success only after commit of both DDL and seed rows.
@@ -152,13 +159,14 @@ async def run_setup(options):
     from app.core.config import settings
     from app.db.database import Base
     from app.db.models import GameSession, User
+    from app.labs.service import lab_login_code
 
     url = make_url(settings.DATABASE_URL)
     if url.drivername != "postgresql+asyncpg":
         raise SetupError("DATABASE_URL must use postgresql+asyncpg.")
     engine = create_async_engine(url, echo=False, hide_parameters=True, connect_args={"timeout": 10})
     try:
-        return await seed_transaction(
+        report = await seed_transaction(
             engine,
             AsyncSession,
             Base.metadata,
@@ -170,6 +178,9 @@ async def run_setup(options):
         )
     finally:
         await engine.dispose()
+    # Handed to the lab's students with their credentials: login accepts no bare lab ID.
+    report["lab_code"] = lab_login_code(options.lab_id)
+    return report
 
 
 def parser():
