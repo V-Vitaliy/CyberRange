@@ -53,6 +53,18 @@ uploaded objects all carry the lab ID.
 Implemented in `auth/` (`service.py`, logins in `router.py`).
 
 - Roles: `red_team`, `blue_team`, `admin`. Passwords are bcrypt hashes.
+- Login (`POST /login` on both teams) takes `username`, `password` and `lab_id`.
+  The user is looked up only inside that lab; an unknown lab fails without any
+  event. `lab_id` only narrows the lookup: after login the lab comes from the
+  token, as below.
+- A failed login is logged as `LOGIN_FAILED` in that lab (username, portal,
+  source IP and how many distinct usernames failed from that source in the last
+  5 minutes; never the password or whether the username exists).
+- Without Login Hardening an unknown username skips bcrypt, so it answers
+  faster (intentional exercise EX-07). With it, unknown usernames are checked
+  against a dummy hash of the same cost, and each source may try at most 10
+  logins per minute in the lab (429 and one `LOGIN_RATE_LIMITED` event per
+  window; not limited while Redis is down).
 - `create_access_token` issues an HS256 JWT signed with `JWT_SECRET` (startup
   fails if it is weak or published). Red Team tokens carry a signed `lab_scope`.
 - `get_current_user_secure` verifies the signature (Blue Team).
@@ -83,10 +95,13 @@ Implemented in `auth/` (`service.py`, logins in `router.py`).
 - **Auto-SOC** (`siem/soc_worker.py`): for solo labs, polls uninvestigated
   events, asks the LangGraph SOC agent (`agents/soc_agent.py`) for a structured
   verdict and saves it in a short transaction. No transaction is open while the
-  model runs. An unreachable model pauses analysis with backoff.
+  model runs. An unreachable model pauses analysis with backoff. Login events
+  (`LOGIN_FAILED`, `LOGIN_RATE_LIMITED`) never reach the model: each poll closes
+  them in bulk with the `siem/forensics.py` rule (5 or more distinct usernames
+  from one source is an enumeration).
 - **Defenses** (`defense/service.py`): Blue Team spends points to enable
   per-session switches (system prompt patch, rate limiter, reranker, JWT strict
-  mode).
+  mode, login hardening).
 
 ## Concurrency model
 
@@ -109,10 +124,10 @@ Implemented in `auth/` (`service.py`, logins in `router.py`).
 | `llm/` | `provider.py`: model factory (OpenAI-compatible, Groq, local GGUF) |
 | `agents/` | `soc_agent.py` (LangGraph SOC analyst), `tools/` (tool registry: schema, risk level, audited handler; `send_email` with `email_service.py`) |
 | `db/` | `models.py`, `database.py`, `ids.py` (`ensure_uuid`) |
-| `auth/` | Users and login: `repository.py` (`UserRepository`), `service.py` (passwords, JWT, `authenticate`, `get_current_user_secure`, `get_blue_team_user`, `get_current_user_vulnerable`), `router.py` (Red and Blue `POST /login`, Blue `GET /me`), `schemas.py` |
+| `auth/` | Users and login: `repository.py` (`UserRepository`), `service.py` (passwords, JWT, `authenticate`, `get_current_user_secure`, `get_blue_team_user`, `get_current_user_vulnerable`, `dummy_password_hash`), `router.py` (Red and Blue `POST /login`, Blue `GET /me`), `schemas.py` |
 | `chat/` | Red Team chat: `repository.py` (`ChatRepository`), `service.py` (RAG pipeline and SSE, thread lookup, history search), `llm_engine.py` (model streaming), `prompt_builder.py`, `sqli_isolation.py` and `sqli_search.py` (lab-isolated SQLi exercise), `router.py` (`/chat/ask`, `/chat/history`), `schemas.py` |
 | `ctf/` | Flag submission: `repository.py` (`CtfRepository`), `service.py` (`hash_ctf_flag`, `submit_flag`), `router.py` (`POST /api/red/ctf/submit`), `schemas.py` |
-| `defense/` | Defense shop and rate limit: `service.py` (`process_defense_purchase`, `enforce_rate_limit`), `router.py` (`POST /api/blue/defenses/buy`), `schemas.py` |
+| `defense/` | Defense shop and rate limit: `service.py` (`process_defense_purchase`, `enforce_rate_limit`, `enforce_login_attempt_limit`), `router.py` (`POST /api/blue/defenses/buy`), `schemas.py` |
 | `documents/` | Uploads and RAG documents: `service.py` (`ETLWorker`: PDF parsing, chunking, embedding), `object_store.py` (S3 uploads, lab-prefixed keys), `chroma_client.py` (`VectorStore`), `router.py` (`POST /api/red/upload`, `/api/red/ws/etl-status/{task_id}`) |
 | `labs/` | Game sessions and exercise seeding: `repository.py` (`GameSessionRepository`, `LabSecretRepository`), `service.py` (`get_session`, `get_session_for_lab`, `get_authorized_session`, `get_exercise_secret`), `exercises.py` (per-lab flags for EX-03/04/05, used by `scripts/seed_exercises.py`) |
 | `siem/` | SIEM events: `repository.py` (`AuditLogRepository`), `service.py` (`log_security_event` for every domain, dashboard stats, logs), `forensics.py` (Blue Team investigation), `soc_worker.py` (Auto-SOC loop), `router.py` (`/investigate`, `/dashboard`, `/logs`), `schemas.py` |
@@ -127,6 +142,8 @@ domain's router. `backend/tests/unit/test_architecture.py` enforces these rules.
 
 - Settings come from `.env` (`core/config.py`); `.env.example` lists every
   variable with placeholders.
+- There are no migrations: `scripts/admin_setup.py` creates the tables and adds
+  columns that later versions introduced (run it once after upgrading).
 - No usable defaults for secrets: `JWT_SECRET`, database and Redis passwords,
   `CHROMA_AUTH_TOKEN`, `S3_ACCESS_KEY` / `S3_SECRET_KEY`. The backend or Compose
   refuses to start without them.

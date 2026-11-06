@@ -25,8 +25,10 @@ attacker's own lab** or removes them unintentionally.
   with secrets. Delivery must stay limited to `EMAIL_ALLOWED_DOMAINS`.
 - **Weak defaults inside the game**: features that are off until the Blue Team
   buys a defense (rate limiter, reranker, prompt patch, JWT strict mode).
-- **Login timing difference** between unknown and known usernames (planned
-  exercise EX-07).
+- **Login timing difference** between unknown and known usernames while the lab
+  has not bought Login Hardening (EX-07). Login looks users up only inside the
+  `lab_id` from the request; this narrows the lookup and grants nothing.
+  `LOGIN_FAILED` must not record the password or whether the username exists.
 
 ## Review priorities
 
