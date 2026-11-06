@@ -56,8 +56,9 @@ function DashboardContent() {
           <form onSubmit={(e: React.FormEvent<HTMLFormElement>) => {
             e.preventDefault();
             const data = new FormData(e.currentTarget);
-            login(String(data.get('username') || ''), String(data.get('password') || ''));
+            login(String(data.get('username') || ''), String(data.get('password') || ''), String(data.get('lab_id') || '').trim());
           }} className="space-y-4">
+            <input name="lab_id" required placeholder={t.labId} autoComplete="off" className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3 text-sm outline-none focus:border-indigo-500 transition-colors" />
             <input name="username" placeholder={t.username} defaultValue="blue_defender" className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3 text-sm outline-none focus:border-indigo-500 transition-colors" />
             <input name="password" type="password" placeholder={t.password} defaultValue="secret" className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3 text-sm outline-none focus:border-indigo-500 transition-colors" />
             {error && <p className="text-red-500 text-[10px] text-center font-bold uppercase">{error}</p>}
