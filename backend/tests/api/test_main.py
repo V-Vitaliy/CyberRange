@@ -190,7 +190,9 @@ async def test_login_password_check_runs_off_the_event_loop(monkeypatch, side):
     user = SimpleNamespace(
         id=uuid4(), username="test-user", role=side + "_team", lab_instance_id=uuid4(), password_hash="hash"
     )
-    monkeypatch.setattr(UserRepository, "get_by_username", AsyncMock(return_value=user))
+    monkeypatch.setattr(UserRepository, "get_by_username_in_lab", AsyncMock(return_value=user), raising=False)
+    session = SimpleNamespace(lab_instance_id=user.lab_instance_id, login_hardening_enabled=False)
+    monkeypatch.setattr(GameSessionRepository, "get_by_lab_instance_id", AsyncMock(return_value=session))
     threads = []
 
     def verify(plain, hashed):
@@ -208,9 +210,48 @@ async def test_login_password_check_runs_off_the_event_loop(monkeypatch, side):
     sub_app.dependency_overrides[get_db] = database
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-            response = await client.post(f"/api/{side}/login", json={"username": "test-user", "password": "x"})
+            body = {"username": "test-user", "password": "x", "lab_id": str(user.lab_instance_id)}
+            response = await client.post(f"/api/{side}/login", json=body)
     finally:
         sub_app.dependency_overrides.clear()
         sub_app.dependency_overrides.update(previous)
     assert response.status_code == 200
     assert threads and threads[0] != threading.get_ident()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("side", ["red", "blue"])
+@pytest.mark.parametrize("lab_id", [None, "", "not-a-uuid"])
+async def test_login_requires_a_lab_id(client, side, lab_id):
+    body = {"username": "test-user", "password": "x"}
+    if lab_id is not None:
+        body["lab_id"] = lab_id
+    response = await client.post(f"/api/{side}/login", json=body)
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("side", ["red", "blue"])
+async def test_login_passes_lab_source_and_portal_to_authentication(client, monkeypatch, side):
+    from app.auth import router as auth_router
+
+    authenticate = AsyncMock(return_value=None)
+    monkeypatch.setattr(auth_router, "authenticate", authenticate)
+    sub_app = red_app if side == "red" else blue_app
+
+    async def database():
+        yield object()
+
+    previous = dict(sub_app.dependency_overrides)
+    sub_app.dependency_overrides[get_db] = database
+    try:
+        lab = uuid4()
+        body = {"username": "test-user", "password": "x", "lab_id": str(lab)}
+        response = await client.post(f"/api/{side}/login", json=body)
+    finally:
+        sub_app.dependency_overrides.clear()
+        sub_app.dependency_overrides.update(previous)
+    assert response.status_code == 401
+    authenticate.assert_awaited_once()
+    assert authenticate.call_args.args[1:] == ("test-user", "x", lab)
+    assert authenticate.call_args.kwargs == {"source_ip": "127.0.0.1", "portal": side}

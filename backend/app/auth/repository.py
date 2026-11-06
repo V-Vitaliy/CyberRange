@@ -24,6 +24,13 @@ class UserRepository:
         return result.scalars().first()
 
     @staticmethod
+    async def get_by_username_in_lab(db: AsyncSession, username: str, lab_instance_id: uuid.UUID) -> Optional[User]:
+        result = await db.execute(
+            select(User).where(User.username == username, User.lab_instance_id == ensure_uuid(lab_instance_id))
+        )
+        return result.scalars().first()
+
+    @staticmethod
     async def add(db: AsyncSession, **values) -> User:
         user = User(**values)
         db.add(user)

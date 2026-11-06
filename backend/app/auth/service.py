@@ -1,6 +1,7 @@
 """Passwords, JWT tokens and the FastAPI dependencies that authenticate users."""
 
 import asyncio
+import functools
 import hashlib
 import secrets
 import uuid
@@ -15,11 +16,13 @@ from starlette.requests import HTTPConnection
 
 from app.auth.repository import UserRepository
 from app.core.config import settings
+from app.core.redis_client import redis_client
 from app.db.database import get_db
 from app.db.ids import ensure_uuid
 from app.db.models import User
+from app.defense.service import enforce_login_attempt_limit
 from app.labs.service import get_session_for_lab
-from app.siem.service import log_jwt_manipulation_attempt
+from app.siem.service import log_failed_login, log_jwt_manipulation_attempt
 
 
 # ---------------------------------------------------------
@@ -41,6 +44,12 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verifies the password directly via bcrypt."""
     password_bytes = _pre_hash(plain_password)
     return bcrypt.checkpw(password_bytes, hashed_password.encode("utf-8"))
+
+
+@functools.cache
+def dummy_password_hash() -> str:
+    """Hash of a random password, as costly to check as a real one (Login Hardening)."""
+    return get_password_hash(secrets.token_urlsafe(32))
 
 
 # ---------------------------------------------------------
@@ -218,9 +227,25 @@ async def get_or_create_hidden_user(db: AsyncSession, username: str, role: str, 
     )
 
 
-async def authenticate(db: AsyncSession, username: str, password: str) -> User | None:
-    """Return the user when the password matches; bcrypt runs off the event loop."""
-    user = await UserRepository.get_by_username(db, username)
-    if not user or not await asyncio.to_thread(verify_password, password, user.password_hash):
+async def authenticate(
+    db: AsyncSession, username: str, password: str, lab_instance_id: uuid.UUID, *, source_ip: str, portal: str
+) -> User | None:
+    """Return the lab's user when the password matches; bcrypt runs off the event loop.
+
+    Without Login Hardening an unknown username skips bcrypt and answers faster:
+    the intended EX-07 timing difference. Failed logins are logged in the lab.
+    """
+    session = await get_session_for_lab(db, lab_instance_id)
+    if session is None:
         return None
-    return user
+    if session.login_hardening_enabled:
+        await enforce_login_attempt_limit(redis_client, session, source_ip)
+    user = await UserRepository.get_by_username_in_lab(db, username, lab_instance_id)
+    if user is not None:
+        if await asyncio.to_thread(verify_password, password, user.password_hash):
+            return user
+    elif session.login_hardening_enabled:
+        # The dummy hash is created in the thread too: its first use runs bcrypt twice.
+        await asyncio.to_thread(lambda: verify_password(password, dummy_password_hash()))
+    await log_failed_login(lab_instance_id=str(lab_instance_id), username=username, source_ip=source_ip, portal=portal)
+    return None

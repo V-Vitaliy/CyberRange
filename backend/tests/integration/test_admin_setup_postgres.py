@@ -187,11 +187,14 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
 
             # Exercise actual mounted HTTP routes, auth dependencies and DB repositories.
             # ASGITransport does not run lifespan: no Redis/Chroma/LLM startup.
+            def credentials(name, password, lab=lab_id):
+                return {"username": name, "password": password, "lab_id": str(lab)}
+
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app), base_url="http://integration"
             ) as client:
                 for side, name, password in (("red", red_name, red_password), ("blue", blue_name, blue_password)):
-                    response = await client.post(f"/api/{side}/login", json={"username": name, "password": password})
+                    response = await client.post(f"/api/{side}/login", json=credentials(name, password))
                     self.assertEqual(response.status_code, 200, "Real login failed")
                     token = response.json()["access_token"]
                     claims = jwt.decode(token, os.environ["JWT_SECRET"], algorithms=["HS256"])
@@ -209,11 +212,16 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
                         profile = await client.get("/api/blue/me", headers={"Authorization": "Bearer " + token})
                         self.assertEqual(profile.status_code, 200)
                         self.assertEqual(profile.json()["session_id"], first["session_id"])
-                    bad = await client.post(f"/api/{side}/login", json={"username": name, "password": "incorrect"})
+                    bad = await client.post(f"/api/{side}/login", json=credentials(name, "incorrect"))
                     self.assertEqual(bad.status_code, 401)
                 for side, name, password in (("red", blue_name, blue_password), ("blue", red_name, red_password)):
-                    denied = await client.post(f"/api/{side}/login", json={"username": name, "password": password})
+                    denied = await client.post(f"/api/{side}/login", json=credentials(name, password))
                     self.assertEqual(denied.status_code, 403)
+                unknown = await client.post("/api/red/login", json=credentials(prefix + "_nobody", "x"))
+                self.assertEqual(unknown.status_code, 401)
+                # A real username and password in another lab are unknown there; nothing is logged.
+                foreign = await client.post("/api/red/login", json=credentials(red_name, red_password, uuid4()))
+                self.assertEqual(foreign.status_code, 401)
             async with db_factory() as db:
                 events = (
                     (
@@ -228,6 +236,29 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
                     .all()
                 )
                 self.assertEqual(len(events), 1, "Red login audit was not persisted")
+                failed = (
+                    (
+                        await db.execute(
+                            select(SecurityAuditLog)
+                            .where(
+                                SecurityAuditLog.lab_instance_id == lab_id,
+                                SecurityAuditLog.event_type == "LOGIN_FAILED",
+                            )
+                            .order_by(SecurityAuditLog.timestamp)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                # The distinct-username count runs as real JSONB SQL against this lab and source only.
+                self.assertEqual(
+                    [
+                        (e.payload["username"], e.payload["failed_usernames_from_source"], "reason" in e.payload)
+                        for e in failed
+                    ],
+                    [(red_name, 1, False), (blue_name, 2, False), (prefix + "_nobody", 3, False)],
+                )
+                self.assertTrue(all("incorrect" not in str(e.payload) for e in failed))
 
             # Every CLI conflict must leave all rows unchanged, including unrelated labs.
             for kwargs in (

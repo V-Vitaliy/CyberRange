@@ -2,7 +2,7 @@
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 # One AUTH_BYPASS_ATTEMPT per user, claimed role and outcome per window (the default token lifetime).
 JWT_FORGERY_LOG_WINDOW_SECONDS = 15 * 60
+# Failed logins from one source are counted over this window (EX-07 detection).
+LOGIN_ENUMERATION_WINDOW = timedelta(minutes=5)
 
 
 async def log_security_event(
@@ -88,6 +90,28 @@ async def log_jwt_manipulation_attempt(
     return event
 
 
+async def log_failed_login(*, lab_instance_id: str, username: str, source_ip: str, portal: str):
+    """LOGIN_FAILED with the number of distinct usernames that recently failed from this source.
+
+    Neither the password nor the failure reason is recorded: the reason would tell
+    whether the username exists.
+    """
+    since = datetime.now(timezone.utc) - LOGIN_ENUMERATION_WINDOW
+    try:
+        async with async_session() as db:
+            seen = await AuditLogRepository.recent_failed_login_usernames(db, lab_instance_id, source_ip, since)
+        count = len(set(seen) | {username})
+    except Exception:
+        logger.warning("Could not count recent failed logins; logging the attempt without the count")
+        count = None
+    return await log_security_event(
+        lab_instance_id=lab_instance_id,
+        event_type="LOGIN_FAILED",
+        payload={"username": username, "portal": portal, "failed_usernames_from_source": count},
+        source_ip=source_ip,
+    )
+
+
 async def get_dashboard_stats(db: AsyncSession, game_session: GameSession) -> DashboardStatsResponse:
     """Aggregates metrics for the Blue Team React Dashboard (KPI cards)."""
     active_defenses = {
@@ -95,6 +119,7 @@ async def get_dashboard_stats(db: AsyncSession, game_session: GameSession) -> Da
         "rate_limit_enabled": game_session.rate_limit_enabled,
         "reranker_enabled": game_session.use_reranker,
         "jwt_filter_enabled": game_session.jwt_filter_enabled,
+        "login_hardening_enabled": game_session.login_hardening_enabled,
     }
 
     stats = await AuditLogRepository.get_stats(db, game_session.lab_instance_id)

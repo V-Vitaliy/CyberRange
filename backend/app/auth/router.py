@@ -2,7 +2,7 @@
 
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.schemas import LoginRequest, TokenResponse
@@ -16,9 +16,15 @@ red_router = APIRouter()
 blue_router = APIRouter()
 
 
+def client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
 @red_router.post("/login", tags=["Red Team Auth"])
-async def red_team_login(login_req: LoginRequest, db: AsyncSession = Depends(get_db)):
-    user = await authenticate(db, login_req.username, login_req.password)
+async def red_team_login(login_req: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    user = await authenticate(
+        db, login_req.username, login_req.password, login_req.lab_id, source_ip=client_ip(request), portal="red"
+    )
 
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
@@ -46,9 +52,11 @@ async def red_team_login(login_req: LoginRequest, db: AsyncSession = Depends(get
 
 
 @blue_router.post("/login", response_model=TokenResponse, tags=["Blue Team - User"])
-async def login_blue_team(login_data: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login_blue_team(login_data: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """Authenticates a Blue Team user and returns a signed JWT."""
-    user = await authenticate(db, login_data.username, login_data.password)
+    user = await authenticate(
+        db, login_data.username, login_data.password, login_data.lab_id, source_ip=client_ip(request), portal="blue"
+    )
 
     if not user:
         raise HTTPException(status_code=401, detail="Incorrect username or password")

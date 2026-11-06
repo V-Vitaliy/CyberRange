@@ -1,6 +1,7 @@
 """SIEM audit log reads; other domains use app.siem.service, not this repository."""
 
 import uuid
+from datetime import datetime
 from typing import List
 
 from sqlalchemy import desc, func
@@ -51,6 +52,24 @@ class AuditLogRepository:
             "compromised_logs": compromised_logs,
             "pending_investigations": pending_investigations,
         }
+
+    @staticmethod
+    async def recent_failed_login_usernames(
+        db: AsyncSession, lab_instance_id: str | uuid.UUID, source_ip: str, since: datetime
+    ) -> set[str]:
+        """Distinct usernames of LOGIN_FAILED events from one source in the lab since a moment."""
+        username = SecurityAuditLog.payload["username"].astext
+        result = await db.execute(
+            select(username)
+            .distinct()
+            .where(
+                SecurityAuditLog.lab_instance_id == ensure_uuid(lab_instance_id),
+                SecurityAuditLog.event_type == "LOGIN_FAILED",
+                SecurityAuditLog.payload["source_ip"].astext == source_ip,
+                SecurityAuditLog.timestamp >= since,
+            )
+        )
+        return set(result.scalars().all())
 
     @staticmethod
     async def get_logs(db: AsyncSession, lab_instance_id: str | uuid.UUID, limit: int = 50) -> List[SecurityAuditLog]:

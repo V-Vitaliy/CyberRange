@@ -22,3 +22,15 @@ async def test_investigation_cannot_reward_foreign_log(monkeypatch):
     assert log.investigated_at is None
     assert session.defense_budget == 5
     db.commit.assert_not_awaited()
+
+
+@pytest.mark.parametrize("count,malicious", [(None, False), (1, False), (4, False), (5, True), (30, True)])
+def test_failed_login_is_malicious_only_as_an_enumeration_burst(count, malicious):
+    assert forensics.LOGIN_ENUMERATION_THRESHOLD == 5  # distinct usernames from one source in the window
+    # SQL-like usernames do not turn a single failed login into an attack.
+    payload = {"username": "' or 1=1 --", "failed_usernames_from_source": count}
+    assert forensics.analyzer.predict_is_malicious(payload, "LOGIN_FAILED") is malicious
+
+
+def test_blocked_login_burst_is_malicious():
+    assert forensics.analyzer.predict_is_malicious({"limit": 10}, "LOGIN_RATE_LIMITED") is True

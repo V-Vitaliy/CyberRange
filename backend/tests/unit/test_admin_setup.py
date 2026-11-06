@@ -112,6 +112,14 @@ class SeedTests(unittest.IsolatedAsyncioTestCase):
             self.hasher,
         )
 
+    async def test_seed_adds_the_login_hardening_column_to_existing_labs(self):
+        # create_all does not alter tables that already exist.
+        await self.run_seed()
+        self.assertIn(
+            "ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS login_hardening_enabled BOOLEAN NOT NULL DEFAULT FALSE",
+            self.engine.commands,
+        )
+
     async def test_clean_seed_has_explicit_ids_roles_and_hashed_passwords(self):
         report = await self.run_seed()
         red, blue = self.store.users

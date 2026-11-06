@@ -133,6 +133,13 @@ async def seed_transaction(
         await connection.execute(text("SET LOCAL statement_timeout = '30s'"))
         await connection.execute(text("SELECT pg_advisory_xact_lock(721034, 1)"))
         await connection.run_sync(metadata.create_all)
+        # create_all does not alter existing tables; labs created before LAB-8 lack this column.
+        await connection.execute(
+            text(
+                "ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS "
+                "login_hardening_enabled BOOLEAN NOT NULL DEFAULT FALSE"
+            )
+        )
         async with session_factory(bind=connection, expire_on_commit=False) as db:
             result = await seed(make_store(db), options, password_lookup, hash_password)
     return result  # Success only after commit of both DDL and seed rows.

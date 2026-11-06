@@ -107,6 +107,78 @@ class PostgresSocWorkerTests(unittest.IsolatedAsyncioTestCase):
         await observer.dispose()
         await app_engine.dispose()
 
+    async def test_login_events_are_closed_by_rule_and_never_reach_the_model(self):
+        os.environ["DATABASE_URL"] = TEST_URL
+        os.environ["JWT_SECRET"] = secrets.token_urlsafe(48)
+        sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "backend"))
+        from sqlalchemy import select, text
+        from sqlalchemy.engine import make_url
+        from sqlalchemy.ext.asyncio import create_async_engine
+
+        from app.core.queue_manager import LLMQueueManager
+        from app.db.database import Base
+        from app.db.database import engine as app_engine
+        from app.db.models import GameSession, SecurityAuditLog
+        from app.siem import soc_worker
+
+        url = make_url(TEST_URL)
+        self.assertEqual(url.database, TEST_NAME, "Explicit database confirmation mismatch")
+        observer = create_async_engine(url, hide_parameters=True)
+        async with observer.begin() as conn:
+            self.assertEqual(await conn.scalar(text("SELECT current_database()")), TEST_NAME)
+            await conn.run_sync(Base.metadata.create_all)
+        await observer.dispose()
+        solo, team = uuid4(), uuid4()
+        burst, single, prompt, team_event = (uuid4() for _ in range(4))
+        async with soc_worker.async_session() as db:
+            db.add(GameSession(id=uuid4(), team_id=uuid4(), lab_instance_id=solo, is_solo=True))
+            db.add(GameSession(id=uuid4(), team_id=uuid4(), lab_instance_id=team, is_solo=False))
+            for log_id, lab, event_type, payload in (
+                (burst, solo, "LOGIN_FAILED", {"username": "a", "failed_usernames_from_source": 6}),
+                (single, solo, "LOGIN_FAILED", {"username": "b", "failed_usernames_from_source": 1}),
+                (prompt, solo, "LLM_PROMPT", {"prompt": "hi"}),
+                (team_event, team, "LOGIN_FAILED", {"username": "c", "failed_usernames_from_source": 6}),
+            ):
+                db.add(SecurityAuditLog(id=log_id, lab_instance_id=lab, event_type=event_type, payload=payload))
+            await db.commit()
+
+        analyzed = []
+
+        async def analyze(state):
+            analyzed.append(state["event_type"])
+            return {"is_malicious": False, "reasoning": "synthetic verdict"}
+
+        async def rows():
+            async with soc_worker.async_session() as db:
+                result = await db.execute(
+                    select(SecurityAuditLog).where(SecurityAuditLog.id.in_([burst, single, prompt, team_event]))
+                )
+                return {row.id: row for row in result.scalars().all()}
+
+        graph = AsyncMock()
+        graph.ainvoke.side_effect = analyze
+        worker = asyncio.create_task(soc_worker.run_soc_analyst_loop(graph, LLMQueueManager()))
+        try:
+            for _ in range(60):
+                current = await rows()
+                if all(current[log_id].investigated_at for log_id in (burst, single, prompt)):
+                    break
+                await asyncio.sleep(1)
+        finally:
+            worker.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await worker
+
+        current = await rows()
+        self.assertNotIn("LOGIN_FAILED", analyzed, "a login event reached the model")
+        self.assertIn("LLM_PROMPT", analyzed)
+        self.assertTrue(current[burst].is_compromised)
+        self.assertFalse(current[single].is_compromised)
+        self.assertTrue(current[burst].payload["soc_reasoning"].startswith("Rule-based verdict"))
+        # Team labs keep their events for the Blue Team to investigate.
+        self.assertIsNone(current[team_event].investigated_at)
+        await app_engine.dispose()
+
 
 if __name__ == "__main__":
     unittest.main()

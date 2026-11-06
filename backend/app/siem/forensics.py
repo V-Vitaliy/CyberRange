@@ -9,6 +9,11 @@ from app.labs.service import get_session
 from app.siem.repository import AuditLogRepository
 from app.siem.schemas import InvestigateResponse
 
+# Distinct usernames failing from one source within the window that make a login enumeration.
+LOGIN_ENUMERATION_THRESHOLD = 5
+# Event types whose verdict a rule decides; the Auto-SOC never sends them to the model.
+RULE_JUDGED_EVENTS = ("LOGIN_FAILED", "LOGIN_RATE_LIMITED")
+
 
 class MLAnalyzer:
     """
@@ -36,6 +41,13 @@ class MLAnalyzer:
             if payload.get("indexing") == "true":
                 return True
             return False
+
+        if event_type == "LOGIN_FAILED":
+            count = payload.get("failed_usernames_from_source")
+            return count is not None and count >= LOGIN_ENUMERATION_THRESHOLD
+
+        if event_type == "LOGIN_RATE_LIMITED":
+            return True
 
         if event_type == "AUTH_BYPASS_ATTEMPT":
             if payload.get("claimed_role") != "red_team":

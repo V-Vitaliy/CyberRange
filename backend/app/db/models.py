@@ -2,7 +2,7 @@ import uuid
 
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.sql import func
+from sqlalchemy.sql import false, func
 
 from app.db.database import Base
 
@@ -42,6 +42,7 @@ class GameSession(Base):
     rate_limit_enabled = Column(Boolean, default=False)
     rate_limit_rpm = Column(Integer, default=60)
     jwt_filter_enabled = Column(Boolean, default=False)
+    login_hardening_enabled = Column(Boolean, nullable=False, default=False, server_default=false())
 
 
 class ChatThread(Base):

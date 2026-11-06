@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -14,6 +15,7 @@ STATS = {"total_logs": 7, "compromised_logs": 2, "pending_investigations": 3}
 def game_session(**defenses):
     values = dict(system_prompt="You are a helpful university assistant.", rate_limit_enabled=False)
     values.update(use_reranker=False, jwt_filter_enabled=False, defense_budget=5, lab_instance_id=uuid4())
+    values.update(login_hardening_enabled=False)
     values.update(defenses)
     return SimpleNamespace(**values)
 
@@ -22,14 +24,18 @@ def game_session(**defenses):
 async def test_dashboard_combines_lab_stats_budget_and_defenses(monkeypatch):
     stats = AsyncMock(return_value=dict(STATS))
     monkeypatch.setattr(AuditLogRepository, "get_stats", stats)
-    session = game_session(system_prompt="hardened", jwt_filter_enabled=True)
+    session = game_session(system_prompt="hardened", jwt_filter_enabled=True, login_hardening_enabled=True)
     db = object()
     result = await service.get_dashboard_stats(db, session)
     stats.assert_awaited_once_with(db, session.lab_instance_id)
     assert result.model_dump() == dict(
         budget=5,
         active_defenses=dict(
-            prompt_hardening_enabled=True, rate_limit_enabled=False, reranker_enabled=False, jwt_filter_enabled=True
+            prompt_hardening_enabled=True,
+            rate_limit_enabled=False,
+            reranker_enabled=False,
+            jwt_filter_enabled=True,
+            login_hardening_enabled=True,
         ),
         **STATS,
     )
@@ -182,3 +188,37 @@ async def test_failed_event_write_releases_the_window(audit):
     await forgery(lab, user)
     assert audit.opened == 2
     assert audit.commit_errors == []
+
+
+async def failed_login(lab, username="carol"):
+    await service.log_failed_login(lab_instance_id=lab, username=username, source_ip="203.0.113.9", portal="red")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("seen,expected", [(set(), 1), ({"alice", "bob"}, 3), ({"alice", "carol"}, 2)])
+async def test_failed_login_counts_distinct_usernames_from_the_source(audit, monkeypatch, seen, expected):
+    recent = AsyncMock(return_value=seen)
+    monkeypatch.setattr(AuditLogRepository, "recent_failed_login_usernames", recent, raising=False)
+    lab = str(uuid4())
+    await failed_login(lab)
+    [event] = audit.added
+    assert (event.lab_instance_id, event.event_type) == (lab, "LOGIN_FAILED")
+    assert event.payload == {
+        "username": "carol",
+        "portal": "red",
+        "failed_usernames_from_source": expected,
+        "source_ip": "203.0.113.9",
+    }
+    _, counted_lab, source_ip, since = recent.call_args.args
+    assert (counted_lab, source_ip) == (lab, "203.0.113.9")
+    window = datetime.now(timezone.utc) - since
+    assert abs(window - service.LOGIN_ENUMERATION_WINDOW).total_seconds() < 5
+
+
+@pytest.mark.asyncio
+async def test_failed_login_is_logged_even_when_counting_fails(audit, monkeypatch):
+    broken = AsyncMock(side_effect=RuntimeError("database down"))
+    monkeypatch.setattr(AuditLogRepository, "recent_failed_login_usernames", broken, raising=False)
+    await failed_login(str(uuid4()))
+    [event] = audit.added
+    assert event.payload["failed_usernames_from_source"] is None
