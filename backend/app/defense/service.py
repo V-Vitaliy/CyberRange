@@ -137,11 +137,11 @@ async def enforce_login_attempt_limit(redis: Redis, session, source_ip: str) -> 
 
     The first blocked attempt of a window is logged. If Redis is down, logins are not limited.
     """
-    # One key per minute: a counter whose EXPIRE was lost still stops counting when its minute ends.
+    # One key per minute (a fixed window); INCR and EXPIRE apply together, so no counter lacks a TTL.
     key = f"login_attempts:{session.lab_instance_id}:{source_ip}:{int(time.time() // 60)}"
     try:
-        attempts = await redis.incr(key)
-        await redis.expire(key, 60)
+        async with redis.pipeline(transaction=True) as pipe:
+            attempts, _ = await pipe.incr(key).expire(key, 60).execute()
     except Exception:
         logger.warning("Login attempt limit is unavailable; the attempt is allowed")
         return

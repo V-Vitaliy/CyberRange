@@ -83,12 +83,44 @@ async def test_rate_limit_block_is_logged_not_printed(monkeypatch, capsys, caplo
     assert "203.0.113.7" in blocked[0].getMessage()
 
 
+class FakeTransaction:
+    """MULTI/EXEC: the queued commands apply together, or none of them if EXEC is lost."""
+
+    def __init__(self, redis):
+        self.redis, self.commands = redis, []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def incr(self, key):
+        self.commands.append(("incr", key))
+        return self
+
+    def expire(self, key, seconds):
+        self.commands.append(("expire", key, seconds))
+        return self
+
+    async def execute(self):
+        if self.redis.lost_execs:
+            self.redis.lost_execs -= 1
+            raise ConnectionError("connection lost before EXEC")
+        self.redis.transactions.append([name for name, *_ in self.commands])
+        return [await getattr(self.redis, name)(*args) for name, *args in self.commands]
+
+
 class CountingRedis:
     """INCR and EXPIRE on a fake clock without a server; keys vanish when their TTL passes."""
 
-    def __init__(self, fail=False, lost_expiries=0):
-        self.counts, self.deadlines, self.ttls = {}, {}, []
-        self.fail, self.lost_expiries, self.now = fail, lost_expiries, 1_000_000.0
+    def __init__(self, fail=False):
+        self.counts, self.deadlines, self.ttls, self.transactions = {}, {}, [], []
+        self.fail, self.lost_execs, self.now = fail, 0, 1_000_000.0
+
+    def pipeline(self, transaction=True):
+        assert transaction
+        return FakeTransaction(self)
 
     async def incr(self, key):
         if self.fail:
@@ -99,9 +131,8 @@ class CountingRedis:
         return self.counts[key]
 
     async def expire(self, key, seconds):
-        if self.lost_expiries:
-            self.lost_expiries -= 1
-            raise ConnectionError("connection lost after INCR")
+        if self.fail:
+            raise ConnectionError("redis down")
         self.ttls.append(seconds)
         self.deadlines[key] = self.now + seconds
 
@@ -172,10 +203,12 @@ async def test_login_limit_lets_logins_through_when_redis_is_down(login_audit):
 
 
 @pytest.mark.asyncio
-async def test_a_lost_expiry_cannot_block_a_source_beyond_its_minute(login_audit, redis):
-    """INCR succeeded but EXPIRE was lost: the counter must not outlive the minute it counts."""
+async def test_counter_and_expiry_are_set_in_one_transaction(login_audit, redis):
+    """A counter without a TTL would stay in Redis forever: INCR and EXPIRE apply together or not at all."""
     lab = hardened_lab()
-    redis.lost_expiries = 1
-    assert await attempts(redis, lab, defense.LOGIN_ATTEMPTS_PER_MINUTE + 1) == 1
-    redis.now += 60
+    redis.lost_execs = 1
+    assert await attempts(redis, lab, 1) == 0  # Redis failed: the attempt is allowed
+    assert redis.counts == {}
     assert await attempts(redis, lab, 1) == 0
+    assert redis.transactions == [["incr", "expire"]]
+    assert list(redis.counts) == list(redis.deadlines)

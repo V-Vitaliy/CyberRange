@@ -59,6 +59,36 @@ async def test_startup_uses_provider_factory_and_cleans_up_soc(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_startup_prepares_the_login_dummy_hash_off_the_event_loop(monkeypatch):
+    """Login Hardening is constant-time from the first request: no cold dummy hash to build."""
+    import threading
+
+    from app.auth import service as auth_service
+
+    monkeypatch.setattr(main, "create_llm", Mock())
+    monkeypatch.setattr(main, "create_soc_graph", Mock(side_effect=NotImplementedError))  # no SOC task
+    monkeypatch.setattr(main, "VectorStore", Mock())
+    monkeypatch.setattr(main, "ObjectStore", Mock())
+    threads = []
+    real_hash = auth_service.get_password_hash
+
+    def get_password_hash(password):
+        threads.append(threading.get_ident())
+        return real_hash(password)
+
+    monkeypatch.setattr(auth_service, "get_password_hash", get_password_hash)
+    auth_service.dummy_password_hash.cache_clear()
+    try:
+        async with main.lifespan(main.app):
+            assert len(threads) == 1 and threads[0] != threading.get_ident()
+            dummy = auth_service.dummy_password_hash()
+            assert len(threads) == 1  # served from the cache, not built on the first login
+            assert auth_service.verify_password("guess", dummy) is False
+    finally:
+        auth_service.dummy_password_hash.cache_clear()
+
+
+@pytest.mark.asyncio
 async def test_unsupported_local_soc_does_not_prevent_local_api_startup(monkeypatch):
     model = Mock()
     model.with_structured_output.side_effect = NotImplementedError("no structured output")
