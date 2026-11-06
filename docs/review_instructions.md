@@ -27,15 +27,17 @@ attacker's own lab** or removes them unintentionally.
   buys a defense (rate limiter, reranker, prompt patch, JWT strict mode).
 - **Login timing difference** between unknown and known usernames while the lab
   has not bought Login Hardening (EX-07). Login looks users up only inside the
-  `lab_id` from the request; this narrows the lookup and grants nothing.
-  `LOGIN_FAILED` must not record the password or whether the username exists.
+  lab named by the signed `lab_code` (`labs.service.lab_login_code`); a bare lab
+  ID must never be accepted. `LOGIN_FAILED` must not record the password or
+  whether the username exists.
 
 ## Review priorities
 
 1. **Lab isolation (critical).** Any path where a student reaches another lab's
    data, the control-plane database, Redis, Chroma, S3, Mailpit, the host or the
    internet. Check that the lab ID comes from server-side state or a signed
-   claim, never from request input; every Chroma query filters by
+   claim, never from request input (lab IDs are not secret: students can list them
+   through the SQLi exercise); every Chroma query filters by
    `lab_instance_id`; session access goes through `labs.service.get_authorized_session`; new
    object keys and SIEM events are lab-scoped.
 2. **Platform secrets and configuration.** No secrets, tokens, passwords or flags

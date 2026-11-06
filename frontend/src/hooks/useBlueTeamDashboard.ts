@@ -44,13 +44,13 @@ export function useBlueTeamDashboard(requestedSessionId: string | null) {
     setError(err instanceof Error ? err.message : 'Request failed');
   }, [logout]);
 
-  const login = async (username: string, password: string, labId: string) => {
+  const login = async (username: string, password: string, labCode: string) => {
     setLoading(true);
     setError('');
     try {
       const data = await requestJson<{ access_token: string }>(`${API_BASE}/login`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password, lab_id: labId })
+        body: JSON.stringify({ username, password, lab_code: labCode })
       });
       identity.current += 1;
       setToken(data.access_token);

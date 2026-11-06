@@ -12,8 +12,8 @@ or the classic OWASP Top 10.
   instead of using it.
 - The Red Team works through the API (`/api/red/docs`), the Blue Team through the
   dashboard and `/api/blue/docs`.
-- Log in with the lab ID you receive together with your username and password
-  (`lab_id` in the login request); accounts exist only inside their lab.
+- Log in with the lab code you receive together with your username and password
+  (`lab_code` in the login request); accounts exist only inside their lab.
 - Every Red Team action is logged in the lab's SIEM. Blue Team analysts see it.
 
 ## Exercises
