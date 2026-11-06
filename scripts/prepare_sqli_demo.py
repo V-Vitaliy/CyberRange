@@ -24,7 +24,7 @@ async def prepare():
 
     from app.chat.sqli_isolation import provision_lab
     from app.core.config import settings
-    from app.db.database import Base
+    from app.db.database import create_schema
     from app.db.models import ChatThread, GameSession, SecurityAuditLog, User
 
     url = make_url(settings.DATABASE_URL).set(database="cyberrange_setup_test")
@@ -53,7 +53,7 @@ async def prepare():
             async with engine.begin() as conn:
                 if await conn.scalar(text("SELECT current_database()")) != "cyberrange_setup_test":
                     raise ValueError("Database confirmation mismatch.")
-                await conn.run_sync(Base.metadata.create_all)
+                await create_schema(conn)
                 async with AsyncSession(bind=conn, expire_on_commit=False) as db:
                     for label in ("A", "B"):
                         lab, session_id, user_id = uuid4(), uuid4(), uuid4()

@@ -21,6 +21,13 @@ TEST_DATABASE = os.environ.get("CYBERRANGE_SETUP_TEST_DATABASE_NAME")
 
 @unittest.skipUnless(TEST_URL and TEST_DATABASE, "Explicit test PostgreSQL required")
 class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncTearDown(self):
+        # Pooled connections belong to this test's event loop; the next test runs in a new one.
+        from app.db.database import engine, siem_engine
+
+        await engine.dispose()
+        await siem_engine.dispose()
+
     async def test_setup_login_preservation_and_atomic_failures(self):
         # Set before importing application settings; never fall back to .env.
         os.environ["DATABASE_URL"] = TEST_URL
@@ -35,7 +42,7 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
         from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
         from app.auth.service import get_password_hash, verify_password
-        from app.db.database import Base
+        from app.db.database import SCHEMA_UPGRADES, Base
         from app.db.database import engine as app_engine
         from app.db.models import ChatThread, GameSession, SecurityAuditLog, User
         from app.labs.service import lab_from_login_code, lab_login_code
@@ -124,6 +131,7 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
                     Options(failed_lab, prefix + "_failred", prefix + "_failblue"),
                     lambda _: red_password,
                     get_password_hash,
+                    SCHEMA_UPGRADES,
                 )
             self.assertTrue(before == await snapshot(), "Failed transaction changed tables or committed records")
 
@@ -367,7 +375,8 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
                 db.add(GameSession(id=uuid4(), team_id=uuid4(), lab_instance_id=lab, is_solo=False))
                 await db.commit()
             body = {"password": "x", "lab_code": lab_login_code(lab)}
-            with patch.object(database, "async_session", sessions), patch.object(siem, "async_session", sessions):
+            # Requests and event writes share this tiny pool here, the worst case for holding a connection.
+            with patch.object(database, "async_session", sessions), patch.object(siem, "siem_session", sessions):
                 async with httpx.AsyncClient(
                     transport=httpx.ASGITransport(app=app), base_url="http://integration"
                 ) as client:
@@ -400,6 +409,7 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
         os.environ.setdefault("JWT_SECRET", secrets.token_urlsafe(48))
         sys.path.insert(0, str(ROOT / "backend"))
         import time
+        from types import SimpleNamespace
         from unittest.mock import patch
 
         import httpx
@@ -410,6 +420,7 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
         from app.auth import service as auth_service
         from app.db import database
         from app.db.models import GameSession, SecurityAuditLog
+        from app.defense import service as defense_service
         from app.defense.service import LOGIN_ATTEMPTS_PER_MINUTE
         from app.labs.service import lab_login_code
         from app.main import app
@@ -436,8 +447,10 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
             # Redis is not part of this job; the counter double stands in for it.
             with (
                 patch.object(database, "async_session", sessions),
-                patch.object(siem, "async_session", sessions),
+                patch.object(siem, "siem_session", sessions),
                 patch.object(auth_service, "redis_client", CountingRedis()),
+                # One fixed minute: the attempts must not cross into the next counter window.
+                patch.object(defense_service, "time", SimpleNamespace(time=lambda: 1_000_000.0)),
             ):
                 async with httpx.AsyncClient(
                     transport=httpx.ASGITransport(app=app), base_url="http://integration"

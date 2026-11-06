@@ -124,7 +124,7 @@ class SqlStore:
 
 
 async def seed_transaction(
-    engine, session_factory, metadata, text, make_store, options, password_lookup, hash_password
+    engine, session_factory, metadata, text, make_store, options, password_lookup, hash_password, upgrades
 ):
     # Serialize this script's create_all and username checks across all labs.
     # This lock does not govern normal application requests.
@@ -133,13 +133,9 @@ async def seed_transaction(
         await connection.execute(text("SET LOCAL statement_timeout = '30s'"))
         await connection.execute(text("SELECT pg_advisory_xact_lock(721034, 1)"))
         await connection.run_sync(metadata.create_all)
-        # create_all does not alter existing tables; labs created before LAB-8 lack this column.
-        await connection.execute(
-            text(
-                "ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS "
-                "login_hardening_enabled BOOLEAN NOT NULL DEFAULT FALSE"
-            )
-        )
+        # create_all does not alter existing tables (app.db.database.SCHEMA_UPGRADES).
+        for statement in upgrades:
+            await connection.execute(text(statement))
         async with session_factory(bind=connection, expire_on_commit=False) as db:
             result = await seed(make_store(db), options, password_lookup, hash_password)
     return result  # Success only after commit of both DDL and seed rows.
@@ -157,7 +153,7 @@ async def run_setup(options):
 
     from app.auth.service import get_password_hash
     from app.core.config import settings
-    from app.db.database import Base
+    from app.db.database import SCHEMA_UPGRADES, Base
     from app.db.models import GameSession, User
     from app.labs.service import lab_login_code
 
@@ -175,6 +171,7 @@ async def run_setup(options):
             options,
             read_password,
             get_password_hash,
+            SCHEMA_UPGRADES,
         )
     finally:
         await engine.dispose()

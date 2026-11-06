@@ -97,15 +97,19 @@ Implemented in `auth/` (`service.py`, logins in `router.py`).
   `/api/red/ws/etl-status/{task_id}`.
 - **SIEM**: `siem.service.log_security_event` writes lab-scoped events
   to `security_audit_logs` in its own database session, so a failed write never
-  commits or rolls back the request's transaction. The Blue Team reads them; `siem/forensics.py`
-  scores investigations.
+  commits or rolls back the request's transaction. These sessions come from a
+  separate connection pool (`db.database.siem_engine`): a request that holds a
+  connection while logging never waits for another one from its own pool, so
+  concurrent requests cannot deadlock the request pool. The Blue Team reads them;
+  `siem/forensics.py` scores investigations.
 - **Auto-SOC** (`siem/soc_worker.py`): for solo labs, polls uninvestigated
   events, asks the LangGraph SOC agent (`agents/soc_agent.py`) for a structured
   verdict and saves it in a short transaction. No transaction is open while the
   model runs. An unreachable model pauses analysis with backoff. Login events
   (`LOGIN_FAILED`, `LOGIN_RATE_LIMITED`) never reach the model: each poll closes
   them in bulk with the `siem/forensics.py` rule (5 or more distinct usernames
-  from one source is an enumeration).
+  from one source is an enumeration). A `LOGIN_FAILED` whose count could not be
+  taken stays pending.
 - **Defenses** (`defense/service.py`): Blue Team spends points to enable
   per-session switches (system prompt patch, rate limiter, reranker, JWT strict
   mode, login hardening).
@@ -149,8 +153,11 @@ domain's router. `backend/tests/unit/test_architecture.py` enforces these rules.
 
 - Settings come from `.env` (`core/config.py`); `.env.example` lists every
   variable with placeholders.
-- There are no migrations: `scripts/admin_setup.py` creates the tables and adds
-  columns that later versions introduced (run it once after upgrading).
+- There are no migrations. Scripts create missing tables and apply
+  `db.database.SCHEMA_UPGRADES` (idempotent `ALTER TABLE` for columns added
+  later); run `scripts/admin_setup.py` once after upgrading.
+- Lab codes are signed with `JWT_SECRET`: rotating it invalidates every issued
+  lab code (and token); rerun `admin_setup` to print the new codes.
 - No usable defaults for secrets: `JWT_SECRET`, database and Redis passwords,
   `CHROMA_AUTH_TOKEN`, `S3_ACCESS_KEY` / `S3_SECRET_KEY`. The backend or Compose
   refuses to start without them.

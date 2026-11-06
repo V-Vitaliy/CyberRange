@@ -6,7 +6,7 @@ from uuid import UUID
 import httpx
 import openai
 from langchain_core.exceptions import ModelConnectionError
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.agents.soc_agent import AnalysisOutput
 from app.db.database import async_session
@@ -74,6 +74,11 @@ async def close_rule_judged_logs() -> int:
                 SecurityAuditLog.investigated_at.is_(None),
                 GameSession.is_solo.is_(True),
                 SecurityAuditLog.event_type.in_(RULE_JUDGED_EVENTS),
+                # A failed login whose count could not be taken stays pending: the rule cannot judge it.
+                or_(
+                    SecurityAuditLog.event_type != "LOGIN_FAILED",
+                    SecurityAuditLog.payload["failed_usernames_from_source"].astext.isnot(None),
+                ),
             )
             .order_by(SecurityAuditLog.timestamp)
             .limit(SOC_RULE_BATCH_SIZE)

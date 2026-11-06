@@ -360,7 +360,7 @@ async def test_failed_audit_write_leaves_the_request_session_alone(identity, mon
     _, _, claims = identity
     monkeypatch.setattr(service, "log_jwt_manipulation_attempt", siem.log_jwt_manipulation_attempt)
     audit = AuditSessions(commit_errors=[True])
-    monkeypatch.setattr(siem, "async_session", audit, raising=False)
+    monkeypatch.setattr(siem, "siem_session", audit, raising=False)
     monkeypatch.setattr(siem, "redis_client", FakeRedis())
     request_db = SimpleNamespace(add=Mock(), commit=AsyncMock(), rollback=AsyncMock())
     forged = forge_role(service.create_access_token(claims))
