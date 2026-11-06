@@ -24,7 +24,8 @@ attacker's own lab** or removes them unintentionally.
 - **Tool abuse**: the agent may be talked into calling `send_email`, including
   with secrets. Delivery must stay limited to `EMAIL_ALLOWED_DOMAINS`.
 - **Weak defaults inside the game**: features that are off until the Blue Team
-  buys a defense (rate limiter, reranker, prompt patch, JWT strict mode).
+  buys a defense (rate limiter, reranker, prompt patch, JWT strict mode, login
+  hardening).
 - **Login timing difference** between unknown and known usernames while the lab
   has not bought Login Hardening (EX-07). Login looks users up only inside the
   lab named by the signed `lab_code` (`labs.service.lab_login_code`); a bare lab

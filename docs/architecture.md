@@ -67,12 +67,11 @@ Implemented in `auth/` (`service.py`, logins in `router.py`).
   5 minutes; never the password or whether the username exists). Counting and
   writing share one transaction under an advisory lock per lab and source, so
   concurrent failures count each other.
-- Without Login Hardening an unknown username skips bcrypt, so it answers
-  faster (intentional exercise EX-07). With it, unknown usernames are checked
-  against a dummy hash of the same cost (built at startup), and each source may
-  try at most 10 logins per minute in the lab (429 and one `LOGIN_RATE_LIMITED`
-  event per window; one Redis key per minute, set with INCR and EXPIRE in one
-  transaction; not limited while Redis is down).
+- Login Hardening, the shop defense for exercise EX-07, protects login against
+  account enumeration (`auth.service.authenticate`; how is in the instructor
+  notes) and lets each source try at most 10 logins per minute in the lab (429
+  and one `LOGIN_RATE_LIMITED` event per window; one Redis key per minute, set
+  with INCR and EXPIRE in one transaction; not limited while Redis is down).
 - `create_access_token` issues an HS256 JWT signed with `JWT_SECRET` (startup
   fails if it is weak or published). Red Team tokens carry a signed `lab_scope`.
 - `get_current_user_secure` verifies the signature (Blue Team).

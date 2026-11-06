@@ -188,7 +188,8 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
 
             # Exercise actual mounted HTTP routes, auth dependencies and DB repositories.
             # ASGITransport does not run lifespan: no Redis/Chroma/LLM startup.
-            # The setup report hands out the lab's login code with the credentials.
+            # `first` is the report of the real CLI (main -> run_setup, not seed_transaction alone),
+            # which hands out the lab's login code with the credentials.
             self.assertEqual(lab_from_login_code(first["lab_code"]), lab_id)
 
             def credentials(name, password, code=first["lab_code"]):
