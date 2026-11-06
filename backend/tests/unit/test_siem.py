@@ -72,7 +72,7 @@ class FakeRedis:
 
 
 class AuditSessions:
-    """Stand-in for async_session(): each event gets its own session; commits can be made to fail."""
+    """Stand-in for siem_session(): each event gets its own session; commits can be made to fail."""
 
     def __init__(self, commit_errors=()):
         self.added, self.opened, self.rollbacks = [], 0, 0
@@ -105,7 +105,7 @@ class AuditSessions:
 @pytest.fixture
 def audit(monkeypatch):
     sessions = AuditSessions()
-    monkeypatch.setattr(service, "async_session", sessions, raising=False)
+    monkeypatch.setattr(service, "siem_session", sessions, raising=False)
     monkeypatch.setattr(service, "redis_client", FakeRedis(), raising=False)
     return sessions
 
@@ -252,3 +252,13 @@ async def test_failed_login_is_logged_even_when_counting_fails(audit, login_coun
     assert event.payload["failed_usernames_from_source"] is None
     # The failed statement aborted the transaction: it is rolled back before the event is written.
     assert (audit.opened, audit.rollbacks) == (1, 1)
+
+
+def test_siem_writes_use_their_own_connection_pool():
+    """A request holding a request-pool connection never waits for another one to log an event."""
+    from app.db import database
+
+    assert service.siem_session is database.siem_session
+    assert database.siem_session.kw["bind"] is database.siem_engine
+    assert database.siem_engine is not database.engine
+    assert database.siem_engine.pool is not database.engine.pool
