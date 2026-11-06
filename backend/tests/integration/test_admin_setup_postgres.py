@@ -42,7 +42,7 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
         from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
         from app.auth.service import get_password_hash, verify_password
-        from app.db.database import Base
+        from app.db.database import SCHEMA_UPGRADES, Base
         from app.db.database import engine as app_engine
         from app.db.models import ChatThread, GameSession, SecurityAuditLog, User
         from app.labs.service import lab_from_login_code, lab_login_code
@@ -131,6 +131,7 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
                     Options(failed_lab, prefix + "_failred", prefix + "_failblue"),
                     lambda _: red_password,
                     get_password_hash,
+                    SCHEMA_UPGRADES,
                 )
             self.assertTrue(before == await snapshot(), "Failed transaction changed tables or committed records")
 
