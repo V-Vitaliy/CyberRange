@@ -194,11 +194,29 @@ async def failed_login(lab, username="carol"):
     await service.log_failed_login(lab_instance_id=lab, username=username, source_ip="203.0.113.9", portal="red")
 
 
+@pytest.fixture
+def login_counting(monkeypatch):
+    """Records the per-source lock and the count query; `seen` is what the count returns."""
+    state = SimpleNamespace(calls=[], seen=set(), error=None)
+
+    async def lock(db, lab, source_ip):
+        state.calls.append(("lock", db, lab, source_ip))
+
+    async def recent(db, lab, source_ip, since):
+        state.calls.append(("count", db, lab, source_ip, since))
+        if state.error:
+            raise state.error
+        return state.seen
+
+    monkeypatch.setattr(AuditLogRepository, "lock_failed_login_source", lock, raising=False)
+    monkeypatch.setattr(AuditLogRepository, "recent_failed_login_usernames", recent, raising=False)
+    return state
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("seen,expected", [(set(), 1), ({"alice", "bob"}, 3), ({"alice", "carol"}, 2)])
-async def test_failed_login_counts_distinct_usernames_from_the_source(audit, monkeypatch, seen, expected):
-    recent = AsyncMock(return_value=seen)
-    monkeypatch.setattr(AuditLogRepository, "recent_failed_login_usernames", recent, raising=False)
+async def test_failed_login_counts_distinct_usernames_from_the_source(audit, login_counting, seen, expected):
+    login_counting.seen = seen
     lab = str(uuid4())
     await failed_login(lab)
     [event] = audit.added
@@ -209,16 +227,28 @@ async def test_failed_login_counts_distinct_usernames_from_the_source(audit, mon
         "failed_usernames_from_source": expected,
         "source_ip": "203.0.113.9",
     }
-    _, counted_lab, source_ip, since = recent.call_args.args
-    assert (counted_lab, source_ip) == (lab, "203.0.113.9")
+    *_, since = login_counting.calls[-1]
     window = datetime.now(timezone.utc) - since
     assert abs(window - service.LOGIN_ENUMERATION_WINDOW).total_seconds() < 5
 
 
 @pytest.mark.asyncio
-async def test_failed_login_is_logged_even_when_counting_fails(audit, monkeypatch):
-    broken = AsyncMock(side_effect=RuntimeError("database down"))
-    monkeypatch.setattr(AuditLogRepository, "recent_failed_login_usernames", broken, raising=False)
+async def test_failed_login_counts_and_writes_in_one_locked_transaction(audit, login_counting):
+    """Concurrent failures from one source must see each other, or a burst is stored as count 1 each."""
+    lab = str(uuid4())
+    await failed_login(lab)
+    assert audit.opened == 1
+    lock, count = login_counting.calls
+    assert lock == ("lock", audit, lab, "203.0.113.9")
+    assert count[:4] == ("count", audit, lab, "203.0.113.9")
+    assert len(audit.added) == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_login_is_logged_even_when_counting_fails(audit, login_counting):
+    login_counting.error = RuntimeError("database down")
     await failed_login(str(uuid4()))
     [event] = audit.added
     assert event.payload["failed_usernames_from_source"] is None
+    # The failed statement aborted the transaction: it is rolled back before the event is written.
+    assert (audit.opened, audit.rollbacks) == (1, 1)

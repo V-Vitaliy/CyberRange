@@ -38,6 +38,7 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
         from app.db.database import Base
         from app.db.database import engine as app_engine
         from app.db.models import ChatThread, GameSession, SecurityAuditLog, User
+        from app.labs.service import lab_from_login_code, lab_login_code
         from app.main import app
         from scripts.admin_setup import Options, SqlStore, seed_transaction
 
@@ -187,8 +188,11 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
 
             # Exercise actual mounted HTTP routes, auth dependencies and DB repositories.
             # ASGITransport does not run lifespan: no Redis/Chroma/LLM startup.
-            def credentials(name, password, lab=lab_id):
-                return {"username": name, "password": password, "lab_id": str(lab)}
+            # The setup report hands out the lab's login code with the credentials.
+            self.assertEqual(lab_from_login_code(first["lab_code"]), lab_id)
+
+            def credentials(name, password, code=first["lab_code"]):
+                return {"username": name, "password": password, "lab_code": code}
 
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app), base_url="http://integration"
@@ -220,8 +224,11 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
                 unknown = await client.post("/api/red/login", json=credentials(prefix + "_nobody", "x"))
                 self.assertEqual(unknown.status_code, 401)
                 # A real username and password in another lab are unknown there; nothing is logged.
-                foreign = await client.post("/api/red/login", json=credentials(red_name, red_password, uuid4()))
-                self.assertEqual(foreign.status_code, 401)
+                foreign = credentials(red_name, red_password, lab_login_code(uuid4()))
+                self.assertEqual((await client.post("/api/red/login", json=foreign)).status_code, 401)
+                # The bare lab ID (visible to students through the SQLi exercise) is not a login code.
+                bare = credentials(prefix + "_probe", "x", str(lab_id))
+                self.assertEqual((await client.post("/api/red/login", json=bare)).status_code, 401)
             async with db_factory() as db:
                 events = (
                     (

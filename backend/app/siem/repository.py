@@ -54,6 +54,12 @@ class AuditLogRepository:
         }
 
     @staticmethod
+    async def lock_failed_login_source(db: AsyncSession, lab_instance_id: str | uuid.UUID, source_ip: str) -> None:
+        """Hold a transaction-level advisory lock for one source in a lab until commit or rollback."""
+        key = f"login-failures:{ensure_uuid(lab_instance_id)}:{source_ip}"
+        await db.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(key, 0))))
+
+    @staticmethod
     async def recent_failed_login_usernames(
         db: AsyncSession, lab_instance_id: str | uuid.UUID, source_ip: str, since: datetime
     ) -> set[str]:

@@ -179,6 +179,51 @@ class PostgresSocWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(current[team_event].investigated_at)
         await app_engine.dispose()
 
+    async def test_concurrent_failed_logins_from_one_source_count_each_other(self):
+        """Without serialization, a parallel burst would store count 1 everywhere and look benign."""
+        os.environ["DATABASE_URL"] = TEST_URL
+        os.environ["JWT_SECRET"] = secrets.token_urlsafe(48)
+        sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "backend"))
+        from sqlalchemy import select, text
+        from sqlalchemy.engine import make_url
+        from sqlalchemy.ext.asyncio import create_async_engine
+
+        from app.db.database import Base
+        from app.db.database import engine as app_engine
+        from app.db.models import SecurityAuditLog
+        from app.siem import service as siem
+
+        url = make_url(TEST_URL)
+        self.assertEqual(url.database, TEST_NAME, "Explicit database confirmation mismatch")
+        observer = create_async_engine(url, hide_parameters=True)
+        async with observer.begin() as conn:
+            self.assertEqual(await conn.scalar(text("SELECT current_database()")), TEST_NAME)
+            await conn.run_sync(Base.metadata.create_all)
+        await observer.dispose()
+        lab = str(uuid4())
+        names = [f"probe{i}" for i in range(8)]
+        await asyncio.gather(
+            *(
+                siem.log_failed_login(lab_instance_id=lab, username=name, source_ip="198.51.100.20", portal="red")
+                for name in names
+            )
+        )
+        async with siem.async_session() as db:
+            rows = (
+                (
+                    await db.execute(
+                        select(SecurityAuditLog).where(
+                            SecurityAuditLog.lab_instance_id == lab, SecurityAuditLog.event_type == "LOGIN_FAILED"
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        counts = sorted(row.payload["failed_usernames_from_source"] for row in rows)
+        self.assertEqual(counts, list(range(1, len(names) + 1)))
+        await app_engine.dispose()
+
 
 if __name__ == "__main__":
     unittest.main()

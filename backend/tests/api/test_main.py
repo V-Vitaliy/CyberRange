@@ -16,6 +16,7 @@ from app.auth.service import create_access_token
 from app.ctf import service as ctf_service
 from app.ctf.repository import CtfRepository
 from app.db.database import get_db
+from app.labs import service as labs_service
 from app.labs.repository import GameSessionRepository
 from app.main import app, blue_app, red_app
 
@@ -210,7 +211,11 @@ async def test_login_password_check_runs_off_the_event_loop(monkeypatch, side):
     sub_app.dependency_overrides[get_db] = database
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-            body = {"username": "test-user", "password": "x", "lab_id": str(user.lab_instance_id)}
+            body = {
+                "username": "test-user",
+                "password": "x",
+                "lab_code": labs_service.lab_login_code(user.lab_instance_id),
+            }
             response = await client.post(f"/api/{side}/login", json=body)
     finally:
         sub_app.dependency_overrides.clear()
@@ -221,13 +226,25 @@ async def test_login_password_check_runs_off_the_event_loop(monkeypatch, side):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("side", ["red", "blue"])
-@pytest.mark.parametrize("lab_id", [None, "", "not-a-uuid"])
-async def test_login_requires_a_lab_id(client, side, lab_id):
-    body = {"username": "test-user", "password": "x"}
-    if lab_id is not None:
-        body["lab_id"] = lab_id
-    response = await client.post(f"/api/{side}/login", json=body)
+async def test_login_requires_a_lab_code(client, side):
+    response = await client.post(f"/api/{side}/login", json={"username": "test-user", "password": "x"})
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("side", ["red", "blue"])
+@pytest.mark.parametrize("code", ["raw-uuid", "", "not-a-code"])
+async def test_login_rejects_codes_not_issued_by_the_platform(client, monkeypatch, side, code):
+    """A lab UUID is not a credential: a caller who learned another lab's ID cannot probe it."""
+    from app.auth import router as auth_router
+
+    authenticate = AsyncMock(return_value=None)
+    monkeypatch.setattr(auth_router, "authenticate", authenticate)
+    body = {"username": "test-user", "password": "x", "lab_code": str(uuid4()) if code == "raw-uuid" else code}
+    response = await client.post(f"/api/{side}/login", json=body)
+    assert response.status_code == 401
+    assert response.json()["detail"] in ("Invalid credentials", "Incorrect username or password")
+    authenticate.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -246,7 +263,7 @@ async def test_login_passes_lab_source_and_portal_to_authentication(client, monk
     sub_app.dependency_overrides[get_db] = database
     try:
         lab = uuid4()
-        body = {"username": "test-user", "password": "x", "lab_id": str(lab)}
+        body = {"username": "test-user", "password": "x", "lab_code": labs_service.lab_login_code(lab)}
         response = await client.post(f"/api/{side}/login", json=body)
     finally:
         sub_app.dependency_overrides.clear()

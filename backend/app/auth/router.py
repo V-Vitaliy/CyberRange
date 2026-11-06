@@ -9,7 +9,7 @@ from app.auth.schemas import LoginRequest, TokenResponse
 from app.auth.service import authenticate, create_access_token, get_blue_team_user
 from app.db.database import get_db
 from app.db.models import User
-from app.labs.service import get_session_for_lab
+from app.labs.service import get_session_for_lab, lab_from_login_code
 from app.siem.service import log_security_event
 
 red_router = APIRouter()
@@ -22,8 +22,12 @@ def client_ip(request: Request) -> str:
 
 @red_router.post("/login", tags=["Red Team Auth"])
 async def red_team_login(login_req: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
-    user = await authenticate(
-        db, login_req.username, login_req.password, login_req.lab_id, source_ip=client_ip(request), portal="red"
+    lab = lab_from_login_code(login_req.lab_code)
+    # A bare lab ID or a forged code names no lab and gets the same 401 without a lookup.
+    user = (
+        await authenticate(db, login_req.username, login_req.password, lab, source_ip=client_ip(request), portal="red")
+        if lab
+        else None
     )
 
     if not user:
@@ -54,8 +58,14 @@ async def red_team_login(login_req: LoginRequest, request: Request, db: AsyncSes
 @blue_router.post("/login", response_model=TokenResponse, tags=["Blue Team - User"])
 async def login_blue_team(login_data: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """Authenticates a Blue Team user and returns a signed JWT."""
-    user = await authenticate(
-        db, login_data.username, login_data.password, login_data.lab_id, source_ip=client_ip(request), portal="blue"
+    lab = lab_from_login_code(login_data.lab_code)
+    # A bare lab ID or a forged code names no lab and gets the same 401 without a lookup.
+    user = (
+        await authenticate(
+            db, login_data.username, login_data.password, lab, source_ip=client_ip(request), portal="blue"
+        )
+        if lab
+        else None
     )
 
     if not user:

@@ -159,13 +159,14 @@ async def run_setup(options):
     from app.core.config import settings
     from app.db.database import Base
     from app.db.models import GameSession, User
+    from app.labs.service import lab_login_code
 
     url = make_url(settings.DATABASE_URL)
     if url.drivername != "postgresql+asyncpg":
         raise SetupError("DATABASE_URL must use postgresql+asyncpg.")
     engine = create_async_engine(url, echo=False, hide_parameters=True, connect_args={"timeout": 10})
     try:
-        return await seed_transaction(
+        report = await seed_transaction(
             engine,
             AsyncSession,
             Base.metadata,
@@ -177,6 +178,9 @@ async def run_setup(options):
         )
     finally:
         await engine.dispose()
+    # Handed to the lab's students with their credentials: login accepts no bare lab ID.
+    report["lab_code"] = lab_login_code(options.lab_id)
+    return report
 
 
 def parser():

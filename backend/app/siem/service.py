@@ -30,29 +30,29 @@ async def log_security_event(
     so the Blue Team can monitor and investigate them.
     The event is written in its own session: it never commits or rolls back the caller's transaction.
     """
-    if "source_ip" not in payload:
-        payload["source_ip"] = source_ip
-
     async with async_session() as db:
-        try:
-            # Create a new audit log record
-            new_event = SecurityAuditLog(
-                lab_instance_id=lab_instance_id,
-                timestamp=datetime.utcnow(),
-                event_type=event_type,
-                payload=payload,
-            )
+        return await _write_event(db, lab_instance_id, event_type, payload, source_ip)
 
-            db.add(new_event)
-            await db.commit()
-            await db.refresh(new_event)
 
-            return new_event
-
-        except Exception as e:
-            await db.rollback()
-            logger.error(f"SIEM Logger failed to record event '{event_type}': {str(e)}")
-            return None
+async def _write_event(
+    db: AsyncSession, lab_instance_id: str, event_type: str, payload: Dict[str, Any], source_ip: str
+) -> Optional[SecurityAuditLog]:
+    payload.setdefault("source_ip", source_ip)
+    try:
+        new_event = SecurityAuditLog(
+            lab_instance_id=lab_instance_id,
+            timestamp=datetime.utcnow(),
+            event_type=event_type,
+            payload=payload,
+        )
+        db.add(new_event)
+        await db.commit()
+        await db.refresh(new_event)
+        return new_event
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"SIEM Logger failed to record event '{event_type}': {str(e)}")
+        return None
 
 
 async def log_jwt_manipulation_attempt(
@@ -97,19 +97,19 @@ async def log_failed_login(*, lab_instance_id: str, username: str, source_ip: st
     whether the username exists.
     """
     since = datetime.now(timezone.utc) - LOGIN_ENUMERATION_WINDOW
-    try:
-        async with async_session() as db:
+    async with async_session() as db:
+        try:
+            # Counting and writing share one transaction locked per lab and source, so concurrent
+            # failures from one source wait for each other and every count includes the earlier ones.
+            await AuditLogRepository.lock_failed_login_source(db, lab_instance_id, source_ip)
             seen = await AuditLogRepository.recent_failed_login_usernames(db, lab_instance_id, source_ip, since)
-        count = len(set(seen) | {username})
-    except Exception:
-        logger.warning("Could not count recent failed logins; logging the attempt without the count")
-        count = None
-    return await log_security_event(
-        lab_instance_id=lab_instance_id,
-        event_type="LOGIN_FAILED",
-        payload={"username": username, "portal": portal, "failed_usernames_from_source": count},
-        source_ip=source_ip,
-    )
+            count = len(set(seen) | {username})
+        except Exception:
+            logger.warning("Could not count recent failed logins; logging the attempt without the count")
+            await db.rollback()
+            count = None
+        payload = {"username": username, "portal": portal, "failed_usernames_from_source": count}
+        return await _write_event(db, lab_instance_id, "LOGIN_FAILED", payload, source_ip)
 
 
 async def get_dashboard_stats(db: AsyncSession, game_session: GameSession) -> DashboardStatsResponse:

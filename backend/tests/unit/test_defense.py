@@ -84,19 +84,26 @@ async def test_rate_limit_block_is_logged_not_printed(monkeypatch, capsys, caplo
 
 
 class CountingRedis:
-    """INCR and EXPIRE per key without a server; the TTL is recorded, not enforced."""
+    """INCR and EXPIRE on a fake clock without a server; keys vanish when their TTL passes."""
 
-    def __init__(self, fail=False):
-        self.counts, self.ttls, self.fail = {}, {}, fail
+    def __init__(self, fail=False, lost_expiries=0):
+        self.counts, self.deadlines, self.ttls = {}, {}, []
+        self.fail, self.lost_expiries, self.now = fail, lost_expiries, 1_000_000.0
 
     async def incr(self, key):
         if self.fail:
             raise ConnectionError("redis down")
+        if self.deadlines.get(key, float("inf")) <= self.now:
+            del self.counts[key], self.deadlines[key]
         self.counts[key] = self.counts.get(key, 0) + 1
         return self.counts[key]
 
     async def expire(self, key, seconds):
-        self.ttls[key] = seconds
+        if self.lost_expiries:
+            self.lost_expiries -= 1
+            raise ConnectionError("connection lost after INCR")
+        self.ttls.append(seconds)
+        self.deadlines[key] = self.now + seconds
 
 
 def hardened_lab():
@@ -108,6 +115,14 @@ def login_audit(monkeypatch):
     audit = AsyncMock()
     monkeypatch.setattr(defense, "log_security_event", audit)
     return audit
+
+
+@pytest.fixture
+def redis(monkeypatch):
+    """The limiter and the Redis double share one fake clock."""
+    fake = CountingRedis()
+    monkeypatch.setattr(defense, "time", SimpleNamespace(time=lambda: fake.now), raising=False)
+    return fake
 
 
 async def attempts(redis, lab, count, source_ip="203.0.113.9"):
@@ -123,19 +138,22 @@ async def attempts(redis, lab, count, source_ip="203.0.113.9"):
 
 
 @pytest.mark.asyncio
-async def test_login_attempts_are_limited_per_lab_and_source(login_audit):
-    redis, lab = CountingRedis(), hardened_lab()
+async def test_login_attempts_are_limited_per_lab_and_source(login_audit, redis):
+    lab = hardened_lab()
     assert await attempts(redis, lab, defense.LOGIN_ATTEMPTS_PER_MINUTE) == 0
     assert await attempts(redis, lab, 1) == 1
     # Another source in the same lab and the same source in another lab keep their own budget.
     assert await attempts(redis, lab, 1, source_ip="198.51.100.7") == 0
     assert await attempts(redis, hardened_lab(), 1) == 0
-    assert set(redis.ttls.values()) == {60}
+    assert set(redis.ttls) == {60}
+    # The next minute starts a new budget.
+    redis.now += 60
+    assert await attempts(redis, lab, 1) == 0
 
 
 @pytest.mark.asyncio
-async def test_blocked_login_burst_is_logged_once_per_window(login_audit):
-    redis, lab = CountingRedis(), hardened_lab()
+async def test_blocked_login_burst_is_logged_once_per_window(login_audit, redis):
+    lab = hardened_lab()
     assert await attempts(redis, lab, defense.LOGIN_ATTEMPTS_PER_MINUTE + 3) == 3
     login_audit.assert_awaited_once()
     kwargs = login_audit.call_args.kwargs
@@ -151,3 +169,13 @@ async def test_blocked_login_burst_is_logged_once_per_window(login_audit):
 async def test_login_limit_lets_logins_through_when_redis_is_down(login_audit):
     assert await attempts(CountingRedis(fail=True), hardened_lab(), defense.LOGIN_ATTEMPTS_PER_MINUTE + 1) == 0
     login_audit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_lost_expiry_cannot_block_a_source_beyond_its_minute(login_audit, redis):
+    """INCR succeeded but EXPIRE was lost: the counter must not outlive the minute it counts."""
+    lab = hardened_lab()
+    redis.lost_expiries = 1
+    assert await attempts(redis, lab, defense.LOGIN_ATTEMPTS_PER_MINUTE + 1) == 1
+    redis.now += 60
+    assert await attempts(redis, lab, 1) == 0

@@ -1,13 +1,11 @@
-from uuid import UUID
-
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class LoginRequest(BaseModel):
     username: str
     password: str
-    # The lab the account belongs to; usernames are looked up only inside it.
-    lab_id: UUID
+    # Signed code of the lab the account belongs to (from admin_setup); users are looked up only inside it.
+    lab_code: str = Field(max_length=64)
 
 
 class TokenResponse(BaseModel):

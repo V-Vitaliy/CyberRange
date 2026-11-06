@@ -1,6 +1,7 @@
 """Defense shop for the Blue Team and the rate limit it can switch on."""
 
 import logging
+import time
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -136,11 +137,11 @@ async def enforce_login_attempt_limit(redis: Redis, session, source_ip: str) -> 
 
     The first blocked attempt of a window is logged. If Redis is down, logins are not limited.
     """
-    key = f"login_attempts:{session.lab_instance_id}:{source_ip}"
+    # One key per minute: a counter whose EXPIRE was lost still stops counting when its minute ends.
+    key = f"login_attempts:{session.lab_instance_id}:{source_ip}:{int(time.time() // 60)}"
     try:
         attempts = await redis.incr(key)
-        if attempts == 1:
-            await redis.expire(key, 60)
+        await redis.expire(key, 60)
     except Exception:
         logger.warning("Login attempt limit is unavailable; the attempt is allowed")
         return
