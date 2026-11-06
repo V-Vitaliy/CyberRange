@@ -245,7 +245,10 @@ async def authenticate(
         if await asyncio.to_thread(verify_password, password, user.password_hash):
             return user
     elif session.login_hardening_enabled:
-        # The dummy hash is created in the thread too: its first use runs bcrypt twice.
+        # The dummy hash is built at startup; if it is not, it is built here off the loop.
         await asyncio.to_thread(lambda: verify_password(password, dummy_password_hash()))
+    # The read transaction ends first: the event write takes its own connection, and holding
+    # both would let a burst of failed logins exhaust the pool.
+    await db.rollback()
     await log_failed_login(lab_instance_id=str(lab_instance_id), username=username, source_ip=source_ip, portal=portal)
     return None

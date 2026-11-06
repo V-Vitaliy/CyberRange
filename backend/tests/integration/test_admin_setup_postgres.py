@@ -335,6 +335,65 @@ class PostgresSetupTests(unittest.IsolatedAsyncioTestCase):
             await engine.dispose()
             await app_engine.dispose()
 
+    async def test_concurrent_failed_logins_do_not_starve_the_connection_pool(self):
+        """Each failed login must not hold its request connection while waiting for the event's one."""
+        os.environ["DATABASE_URL"] = TEST_URL
+        os.environ["JWT_SECRET"] = secrets.token_urlsafe(48)
+        sys.path.insert(0, str(ROOT / "backend"))
+        from unittest.mock import patch
+
+        import httpx
+        from sqlalchemy import select, text
+        from sqlalchemy.engine import make_url
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+        from app.db import database
+        from app.db.models import GameSession, SecurityAuditLog
+        from app.labs.service import lab_login_code
+        from app.main import app
+        from app.siem import service as siem
+
+        url = make_url(TEST_URL)
+        self.assertEqual(url.database, TEST_DATABASE, "Test database confirmation mismatch")
+        # Two connections: two failed logins that each hold one and wait for another would stall.
+        small = create_async_engine(url, hide_parameters=True, pool_size=2, max_overflow=0, pool_timeout=5)
+        sessions = async_sessionmaker(small, class_=AsyncSession, expire_on_commit=False, autoflush=False)
+        lab = uuid4()
+        try:
+            async with small.begin() as conn:
+                self.assertEqual(await conn.scalar(text("SELECT current_database()")), TEST_DATABASE)
+                await conn.run_sync(database.Base.metadata.create_all)
+            async with sessions() as db:
+                db.add(GameSession(id=uuid4(), team_id=uuid4(), lab_instance_id=lab, is_solo=False))
+                await db.commit()
+            body = {"password": "x", "lab_code": lab_login_code(lab)}
+            with patch.object(database, "async_session", sessions), patch.object(siem, "async_session", sessions):
+                async with httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app), base_url="http://integration"
+                ) as client:
+                    responses = await asyncio.wait_for(
+                        asyncio.gather(
+                            *(client.post("/api/red/login", json={**body, "username": f"nobody{i}"}) for i in range(6))
+                        ),
+                        timeout=30,
+                    )
+            self.assertEqual([r.status_code for r in responses], [401] * 6)
+            async with sessions() as db:
+                rows = (
+                    (
+                        await db.execute(
+                            select(SecurityAuditLog).where(
+                                SecurityAuditLog.lab_instance_id == lab, SecurityAuditLog.event_type == "LOGIN_FAILED"
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+            self.assertEqual(sorted(r.payload["failed_usernames_from_source"] for r in rows), [1, 2, 3, 4, 5, 6])
+        finally:
+            await small.dispose()
+
 
 if __name__ == "__main__":
     unittest.main()

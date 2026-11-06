@@ -182,8 +182,30 @@ def login_lab(monkeypatch):
     )
 
 
-async def login(username="student", password="correct-password", lab=LAB):
-    return await service.authenticate(object(), username, password, lab, source_ip="203.0.113.9", portal="red")
+async def login(username="student", password="correct-password", lab=LAB, db=None):
+    db = db or SimpleNamespace(rollback=AsyncMock())
+    return await service.authenticate(db, username, password, lab, source_ip="203.0.113.9", portal="red")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("username,password", [("student", "wrong-password"), ("nobody", "correct-password")])
+async def test_failed_login_releases_the_request_connection_before_logging(login_lab, username, password):
+    """The event write needs its own connection: holding both lets a burst of failures starve the pool."""
+    db = SimpleNamespace(rollback=AsyncMock())
+
+    async def logged(**event):
+        assert db.rollback.await_count == 1, "the request transaction is still open"
+
+    login_lab.failed.side_effect = logged
+    assert await login(username, password, db=db) is None
+    login_lab.failed.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_successful_login_keeps_the_request_transaction(login_lab):
+    db = SimpleNamespace(rollback=AsyncMock())
+    assert await login(db=db) is login_lab.user
+    db.rollback.assert_not_awaited()
 
 
 @pytest.mark.asyncio
