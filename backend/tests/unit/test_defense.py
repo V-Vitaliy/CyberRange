@@ -161,7 +161,7 @@ async def attempts(redis, lab, count, source_ip="203.0.113.9"):
     blocked = 0
     for _ in range(count):
         try:
-            await defense.enforce_login_attempt_limit(redis, lab, source_ip)
+            await defense.enforce_login_attempt_limit(redis, lab.lab_instance_id, source_ip)
         except HTTPException as exc:
             assert exc.status_code == 429
             blocked += 1

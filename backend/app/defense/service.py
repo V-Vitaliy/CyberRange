@@ -132,13 +132,13 @@ async def enforce_rate_limit(db: AsyncSession, redis: Redis, session_id: UUID, c
         )
 
 
-async def enforce_login_attempt_limit(redis: Redis, session, source_ip: str) -> None:
+async def enforce_login_attempt_limit(redis: Redis, lab_instance_id: UUID, source_ip: str) -> None:
     """Login Hardening: at most LOGIN_ATTEMPTS_PER_MINUTE login attempts per source in the lab.
 
     The first blocked attempt of a window is logged. If Redis is down, logins are not limited.
     """
     # One key per minute (a fixed window); INCR and EXPIRE apply together, so no counter lacks a TTL.
-    key = f"login_attempts:{session.lab_instance_id}:{source_ip}:{int(time.time() // 60)}"
+    key = f"login_attempts:{lab_instance_id}:{source_ip}:{int(time.time() // 60)}"
     try:
         async with redis.pipeline(transaction=True) as pipe:
             attempts, _ = await pipe.incr(key).expire(key, 60).execute()
@@ -149,7 +149,7 @@ async def enforce_login_attempt_limit(redis: Redis, session, source_ip: str) -> 
         return
     if attempts == LOGIN_ATTEMPTS_PER_MINUTE + 1:
         await log_security_event(
-            lab_instance_id=str(session.lab_instance_id),
+            lab_instance_id=str(lab_instance_id),
             event_type="LOGIN_RATE_LIMITED",
             payload={
                 "limit": LOGIN_ATTEMPTS_PER_MINUTE,

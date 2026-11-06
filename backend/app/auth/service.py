@@ -238,13 +238,17 @@ async def authenticate(
     session = await get_session_for_lab(db, lab_instance_id)
     if session is None:
         return None
-    if session.login_hardening_enabled:
-        await enforce_login_attempt_limit(redis_client, session, source_ip)
+    hardened = session.login_hardening_enabled
+    if hardened:
+        # The limiter writes LOGIN_RATE_LIMITED on its own connection: release this one first.
+        # The rollback expires `session`, so only the values read above are used from here on.
+        await db.rollback()
+        await enforce_login_attempt_limit(redis_client, lab_instance_id, source_ip)
     user = await UserRepository.get_by_username_in_lab(db, username, lab_instance_id)
     if user is not None:
         if await asyncio.to_thread(verify_password, password, user.password_hash):
             return user
-    elif session.login_hardening_enabled:
+    elif hardened:
         # The dummy hash is built at startup; if it is not, it is built here off the loop.
         await asyncio.to_thread(lambda: verify_password(password, dummy_password_hash()))
     # The read transaction ends first: the event write takes its own connection, and holding

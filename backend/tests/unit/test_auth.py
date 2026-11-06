@@ -275,10 +275,24 @@ async def test_hardening_limits_attempts_before_any_lookup(login_lab):
     with pytest.raises(HTTPException) as exc:
         await login()
     assert exc.value.status_code == 429
-    login_lab.limit.assert_awaited_once_with(service.redis_client, login_lab.session, "203.0.113.9")
+    login_lab.limit.assert_awaited_once_with(service.redis_client, LAB, "203.0.113.9")
     login_lab.users.assert_not_awaited()
     login_lab.failed.assert_not_awaited()
     assert login_lab.checked == []
+
+
+@pytest.mark.asyncio
+async def test_hardened_login_releases_the_request_connection_before_the_limiter(login_lab):
+    """The limiter writes LOGIN_RATE_LIMITED on its own connection when it blocks a source."""
+    login_lab.session.login_hardening_enabled = True
+    db = SimpleNamespace(rollback=AsyncMock())
+
+    async def limit(redis, lab, source_ip):
+        assert db.rollback.await_count == 1, "the request transaction is still open"
+
+    login_lab.limit.side_effect = limit
+    assert await login(db=db) is login_lab.user
+    login_lab.limit.assert_awaited_once()
 
 
 def test_auth_routers_hold_login_and_blue_profile():
