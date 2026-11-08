@@ -38,6 +38,12 @@ def ticket_tool(monkeypatch):
     return handler
 
 
+@pytest.fixture
+def audit(monkeypatch):
+    """Replaces only the tool audit; unlike `harness`, keeps the real asyncio.to_thread."""
+    monkeypatch.setattr(registry, "log_security_event", AsyncMock())
+
+
 @pytest.fixture(autouse=True)
 def turn_log(monkeypatch):
     monkeypatch.setattr(llm_engine, "log_security_event", AsyncMock(), raising=False)
@@ -207,7 +213,7 @@ async def test_purchased_reranker_filters_tool_results(harness, monkeypatch, ena
 
 
 @pytest.mark.asyncio
-async def test_document_search_runs_off_the_event_loop(harness):
+async def test_document_search_runs_off_the_event_loop(audit):
     threads = []
 
     def lookup(*args, **kwargs):
@@ -222,7 +228,7 @@ async def test_document_search_runs_off_the_event_loop(harness):
 
 
 @pytest.mark.asyncio
-async def test_reranker_loading_and_scoring_run_off_the_event_loop(harness, monkeypatch):
+async def test_reranker_loading_and_scoring_run_off_the_event_loop(audit, monkeypatch):
     threads = {}
 
     def predict(pairs):
