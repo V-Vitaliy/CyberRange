@@ -19,11 +19,13 @@ def _truncate(value: str) -> str:
     return value if len(value) <= AGENT_LOG_VALUE_CHARS else value[:AGENT_LOG_VALUE_CHARS] + "…"
 
 
-async def _model_step(chat_model, messages: list, queue: LLMQueueManager) -> AsyncIterator[str | AIMessageChunk]:
-    """Stream one model call under the GPU lock: text chunks, then the merged response."""
+async def _model_step(
+    chat_model, messages: list, queue: LLMQueueManager, lab_instance_id: str
+) -> AsyncIterator[str | AIMessageChunk]:
+    """Stream one model call in a model slot of the lab: text chunks, then the merged response."""
     response = None
     has_text = False
-    async for chunk in queue.stream_with_lock(lambda: chat_model.astream(messages)):
+    async for chunk in queue.stream_with_slot(lab_instance_id, lambda: chat_model.astream(messages)):
         response = chunk if response is None else response + chunk
         if isinstance(chunk.content, str) and chunk.content:
             has_text = has_text or bool(chunk.content.strip())
@@ -63,7 +65,7 @@ async def run_agent_turn(
     try:
         for step in range(1, AGENT_MAX_STEPS + 1):
             response = None
-            async for item in _model_step(chat_model, messages, queue):
+            async for item in _model_step(chat_model, messages, queue, context.lab_instance_id):
                 if isinstance(item, str):
                     yield {"text": item}
                 else:

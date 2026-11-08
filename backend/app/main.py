@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI):
     require_strong_jwt_secret(settings.JWT_SECRET)
     # Built once off the loop, so Login Hardening is constant-time from the first request.
     await asyncio.to_thread(dummy_password_hash)
-    queue_manager = LLMQueueManager()
+    queue_manager = LLMQueueManager.from_settings(settings)
     vector_store = VectorStore()
     object_store = ObjectStore.from_settings()
 

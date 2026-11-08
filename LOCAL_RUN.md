@@ -57,6 +57,39 @@ now surface as SSE errors and are not saved as successful chat turns. Increase
 the configured budget if a longer request still reaches its limit. Groq/GGUF
 retain their existing 512-token defaults.
 
+### Serving several players: llama-server with parallel slots
+
+The in-process GGUF model runs one generation at a time, so players wait for
+each other. llama.cpp's `llama-server` loads the model once and serves `N`
+requests at once in parallel slots:
+
+```bash
+llama-server -m models/Meta-Llama-3-8B.Q4_K_M.gguf --alias llama-3-8b \
+  --host 127.0.0.1 --port 8080 -ngl 99 --parallel 4 -c 16384
+```
+
+```dotenv
+LLM_PROVIDER=openai_compatible
+LLM_BASE_URL=http://127.0.0.1:8080/v1
+LLM_MODEL=llama-3-8b
+LLM_MAX_CONCURRENCY=4
+LLM_MAX_CONCURRENCY_PER_LAB=1
+```
+
+- Set `LLM_MAX_CONCURRENCY` to the server's `--parallel`: a higher value only
+  moves the waiting into the server, where requests run into the 120-second
+  HTTP timeout instead of a clear 503.
+- `-c` is the context of all slots together; each slot gets `c / N` tokens. One
+  agent turn needs room for the system prompt, the question, the tool results
+  of the turn (a document search returns up to 4,000 characters, about 1,000
+  tokens) and up to `LLM_MAX_TOKENS` of output. Plan for at least 4,096 tokens
+  per slot (`-c` = 4096 × `N`) and more if turns call several tools.
+- The KV cache for `-c` takes VRAM next to the weights. If the server does not
+  start or runs out of memory, lower `N` (and `-c` with it) before shortening
+  the per-slot context.
+- `LLM_MAX_CONCURRENCY_PER_LAB` keeps one lab, for example during EX-06, from
+  taking every slot; raise it only if a lab needs parallel chats.
+
 Streaming through the configured server, email tool calls (SMTP disabled), and SOC function-call output
 were checked separately against this server. SOC sends one schema tool with
 `tool_choice=required`, uses a complete nonstreaming response, and rejects malformed

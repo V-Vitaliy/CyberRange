@@ -1,5 +1,6 @@
 """Chat streaming and tool execution; real adapters with offline HTTP doubles."""
 
+import asyncio
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -326,24 +327,24 @@ async def test_failed_step_after_a_tool_call_is_still_logged(harness, turn_log):
 
 
 @pytest.mark.asyncio
-async def test_gpu_lock_is_held_only_while_the_model_runs(harness, turn_log):
+async def test_model_slot_is_held_only_while_the_model_runs(harness, turn_log):
     _, delivery = harness
     queue = LLMQueueManager()
     seen = []
 
     class LockAwareModel(ScriptedModel):
         async def astream(self, messages):
-            seen.append(("model", queue.gpu_lock.locked()))
+            seen.append(("model", queue.model_slots.locked()))
             async for chunk in super().astream(messages):
                 yield chunk
 
-    delivery.side_effect = lambda *args: seen.append(("tool", queue.gpu_lock.locked())) or True
+    delivery.side_effect = lambda *args: seen.append(("tool", queue.model_slots.locked())) or True
     model = Mock()
     model.bind_tools.return_value = LockAwareModel([tool_chunk(EMAIL)], [AIMessageChunk(content="Done.")])
     [_ async for _ in llm_engine.run_agent_turn(model, "system", "question", TURN, queue)]
     # Between steps the model is free for the Auto-SOC and other chats.
     assert seen == [("model", True), ("tool", False), ("model", True)]
-    assert not queue.gpu_lock.locked()
+    assert not queue.model_slots.locked()
 
 
 @pytest.mark.asyncio
@@ -372,3 +373,18 @@ async def test_tool_failure_on_the_first_step_is_part_of_the_turn(harness, turn_
     assert step["tool"] == "search_documents" and "Tool execution failed" in step["outcome"]
     payload = turn_log.call_args.kwargs["payload"]
     assert (payload["status"], len(payload["steps"])) == ("answered", 1)
+
+
+@pytest.mark.asyncio
+async def test_model_calls_take_the_slot_of_the_turns_lab(harness, turn_log):
+    queue = LLMQueueManager(max_concurrency=2, max_per_lab=1)
+    await queue.wait_for_turn(LAB)  # this lab already has a generation running
+    other = ToolContext(lab_instance_id=str(uuid4()), role="red_team", use_reranker=False, vector_store=None)
+    events, _ = await asyncio.wait_for(run_turn([AIMessageChunk(content="Other lab.")], queue=queue, turn=other), 1)
+    assert text(events) == "Other lab."
+    same_lab = asyncio.create_task(run_turn([AIMessageChunk(content="Same lab.")], queue=queue))
+    await asyncio.sleep(0.05)
+    assert not same_lab.done()  # waits for its lab's slot
+    queue.release_turn(LAB)
+    events, _ = await asyncio.wait_for(same_lab, 1)
+    assert text(events) == "Same lab."

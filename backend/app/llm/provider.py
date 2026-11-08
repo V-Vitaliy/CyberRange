@@ -20,6 +20,12 @@ def create_llm() -> BaseChatModel:
         return init_openai_compatible()
     if settings.GROQ_API_KEY:
         return init_groq()
+    if settings.LLM_MAX_CONCURRENCY != 1:
+        # One llama.cpp context cannot run two generations at once.
+        raise ValueError(
+            "LLM_MAX_CONCURRENCY must be 1 for the in-process GGUF model; to serve requests in parallel, "
+            "run a model server (for example llama-server --parallel N) with LLM_PROVIDER=openai_compatible"
+        )
     return init_gguf()
 
 

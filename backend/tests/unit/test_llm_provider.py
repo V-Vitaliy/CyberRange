@@ -74,3 +74,27 @@ def test_request_dependency_returns_application_model():
     model = object()
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(llm=model)))
     assert provider.get_llm_instance(request) is model
+
+
+@pytest.mark.parametrize("limit", [2, 4])
+def test_in_process_gguf_refuses_parallel_generations(monkeypatch, limit):
+    monkeypatch.setattr(provider.settings, "LLM_PROVIDER", "")
+    monkeypatch.setattr(provider.settings, "GROQ_API_KEY", "")
+    monkeypatch.setattr(provider.settings, "LLM_MAX_CONCURRENCY", limit)
+    gguf = Mock()
+    monkeypatch.setattr(provider, "init_gguf", gguf)
+    with pytest.raises(ValueError, match="LLM_MAX_CONCURRENCY"):
+        provider.create_llm()
+    gguf.assert_not_called()  # fails before the weights are loaded
+
+
+@pytest.mark.parametrize(
+    "selected,groq_key,initializer", [("openai_compatible", "", "init_openai_compatible"), ("", "key", "init_groq")]
+)
+def test_external_providers_accept_the_configured_concurrency(monkeypatch, selected, groq_key, initializer):
+    monkeypatch.setattr(provider.settings, "LLM_PROVIDER", selected)
+    monkeypatch.setattr(provider.settings, "GROQ_API_KEY", groq_key)
+    monkeypatch.setattr(provider.settings, "LLM_MAX_CONCURRENCY", 4)
+    model = object()
+    monkeypatch.setattr(provider, initializer, Mock(return_value=model))
+    assert provider.create_llm() is model

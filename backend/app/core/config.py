@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     LLM_API_KEY: str = ""
     # HTTP models may spend part of this budget on reasoning before answering.
     LLM_MAX_TOKENS: int = Field(default=2048, gt=0)
+    # Generations running at once: the in-process GGUF model supports only 1; for a model
+    # server, match its parallel slots (llama-server --parallel). Each lab gets at most
+    # LLM_MAX_CONCURRENCY_PER_LAB of them.
+    LLM_MAX_CONCURRENCY: int = Field(default=1, gt=0)
+    LLM_MAX_CONCURRENCY_PER_LAB: int = Field(default=1, gt=0)
 
     # Input limits against resource exhaustion.
     UPLOAD_MAX_BYTES: int = Field(default=10 * 1024 * 1024, gt=0)
