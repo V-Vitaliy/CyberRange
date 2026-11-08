@@ -114,3 +114,15 @@ def test_object_storage_settings_default_to_local_gateway_without_credentials(mo
     assert settings.S3_ENDPOINT_URL == "http://localhost:8333"
     assert settings.S3_BUCKET == "lab-uploads"
     assert settings.S3_ACCESS_KEY == settings.S3_SECRET_KEY == ""
+
+
+def test_model_concurrency_defaults_to_one_generation_per_lab(monkeypatch):
+    for key in ("LLM_MAX_CONCURRENCY", "LLM_MAX_CONCURRENCY_PER_LAB"):
+        monkeypatch.delenv(key, raising=False)
+    settings = Settings(_env_file=None)
+    assert (settings.LLM_MAX_CONCURRENCY, settings.LLM_MAX_CONCURRENCY_PER_LAB) == (1, 1)
+    example = Settings(_env_file=ROOT_DIR / ".env.example")
+    assert (example.LLM_MAX_CONCURRENCY, example.LLM_MAX_CONCURRENCY_PER_LAB) == (1, 1)
+    for key in ("LLM_MAX_CONCURRENCY", "LLM_MAX_CONCURRENCY_PER_LAB"):
+        with pytest.raises(ValidationError):
+            Settings(_env_file=None, **{key: 0})

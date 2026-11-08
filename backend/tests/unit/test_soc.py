@@ -15,6 +15,8 @@ from app.db.models import SecurityAuditLog
 from app.siem import soc_worker
 from tests.openai_doubles import assert_request, make_model
 
+LAB = str(uuid4())
+
 
 @pytest.fixture(autouse=True)
 def rule_closing(monkeypatch):
@@ -50,7 +52,7 @@ async def test_soc_worker_keeps_failed_log_pending_and_processes_next(monkeypatc
     monkeypatch.setattr(
         soc_worker,
         "fetch_pending_logs",
-        AsyncMock(return_value=[(failed, "test", {}), (analyzed, "test", {"prompt": "hello"})]),
+        AsyncMock(return_value=[(failed, LAB, "test", {}), (analyzed, LAB, "test", {"prompt": "hello"})]),
     )
     save = AsyncMock(return_value=True)
     monkeypatch.setattr(soc_worker, "save_verdict", save)
@@ -149,7 +151,7 @@ async def test_soc_requires_valid_schema_tool_output(monkeypatch, arguments):
 async def test_soc_worker_backs_off_quietly_while_llm_is_unreachable(monkeypatch, caplog):
     from langchain_core.exceptions import ModelConnectionError
 
-    events = [(uuid4(), "test", {}) for _ in range(3)]
+    events = [(uuid4(), LAB, "test", {}) for _ in range(3)]
     monkeypatch.setattr(soc_worker, "fetch_pending_logs", AsyncMock(return_value=events))
     save = AsyncMock(return_value=True)
     monkeypatch.setattr(soc_worker, "save_verdict", save)
@@ -190,7 +192,7 @@ def _wrapped(cause):
 
 
 async def _run_one_poll(monkeypatch, error):
-    events = [(uuid4(), "test", {}) for _ in range(2)]
+    events = [(uuid4(), LAB, "test", {}) for _ in range(2)]
     monkeypatch.setattr(soc_worker, "fetch_pending_logs", AsyncMock(return_value=events))
     monkeypatch.setattr(soc_worker, "save_verdict", AsyncMock(return_value=True))
     graph = SimpleNamespace(ainvoke=AsyncMock(side_effect=error))
@@ -239,7 +241,7 @@ async def test_soc_outage_mid_batch_keeps_saved_verdicts_and_stops_batch(monkeyp
     monkeypatch.setattr(
         soc_worker,
         "fetch_pending_logs",
-        AsyncMock(return_value=[(first, "t", {}), (second, "t", {}), (third, "t", {})]),
+        AsyncMock(return_value=[(first, LAB, "t", {}), (second, LAB, "t", {}), (third, LAB, "t", {})]),
     )
     save = AsyncMock(return_value=True)
     monkeypatch.setattr(soc_worker, "save_verdict", save)
@@ -298,7 +300,7 @@ async def test_failed_rule_closing_does_not_stop_model_analysis(monkeypatch):
     monkeypatch.setattr(
         soc_worker, "close_rule_judged_logs", AsyncMock(side_effect=RuntimeError("database down")), raising=False
     )
-    monkeypatch.setattr(soc_worker, "fetch_pending_logs", AsyncMock(return_value=[(log_id, "LLM_PROMPT", {})]))
+    monkeypatch.setattr(soc_worker, "fetch_pending_logs", AsyncMock(return_value=[(log_id, LAB, "LLM_PROMPT", {})]))
     save = AsyncMock(return_value=True)
     monkeypatch.setattr(soc_worker, "save_verdict", save)
     monkeypatch.setattr(soc_worker.asyncio, "sleep", AsyncMock(side_effect=asyncio.CancelledError))
@@ -306,3 +308,28 @@ async def test_failed_rule_closing_does_not_stop_model_analysis(monkeypatch):
     with pytest.raises(asyncio.CancelledError):
         await soc_worker.run_soc_analyst_loop(graph, LLMQueueManager())
     save.assert_awaited_once_with(log_id, AnalysisOutput(is_malicious=False, reasoning="normal"))
+
+
+@pytest.mark.asyncio
+async def test_soc_analysis_takes_the_event_labs_slot_and_runs_under_chat_load(monkeypatch):
+    busy_lab, quiet_lab, log_id = str(uuid4()), str(uuid4()), uuid4()
+    queue = LLMQueueManager(max_concurrency=2, max_per_lab=1)
+    await queue.wait_for_turn(busy_lab)  # a chat of another lab fills that lab's share
+    monkeypatch.setattr(soc_worker, "close_rule_judged_logs", AsyncMock(return_value=0), raising=False)
+    monkeypatch.setattr(soc_worker, "fetch_pending_logs", AsyncMock(return_value=[(log_id, quiet_lab, "t", {})]))
+    save = AsyncMock(return_value=True)
+    monkeypatch.setattr(soc_worker, "save_verdict", save)
+    monkeypatch.setattr(soc_worker.asyncio, "sleep", AsyncMock(side_effect=asyncio.CancelledError))
+    held = []
+
+    async def analyze(state):
+        held.append(sorted(queue.lab_slots))
+        return {"is_malicious": False, "reasoning": "normal"}
+
+    graph = SimpleNamespace(ainvoke=AsyncMock(side_effect=analyze))
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(soc_worker.run_soc_analyst_loop(graph, queue), timeout=1)
+    assert held == [sorted([busy_lab, quiet_lab])]  # the event's lab, next to the busy chat
+    save.assert_awaited_once()
+    assert list(queue.lab_slots) == [busy_lab]  # the SOC slot is released after the analysis
+    queue.release_turn(busy_lab)
