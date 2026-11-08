@@ -32,7 +32,8 @@ export async function fetchRedProfile(token: string): Promise<RedProfile> {
   try {
     return await requestJson<RedProfile>(`${RED_API_BASE}/me`, { headers: { Authorization: `Bearer ${token}` } });
   } catch (err) {
-    if (err instanceof ApiError && err.status === 401) clearRedToken();
+    // A late 401 for an old token must not erase a newer login.
+    if (err instanceof ApiError && err.status === 401 && getRedToken() === token) clearRedToken();
     throw err;
   }
 }

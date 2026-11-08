@@ -59,6 +59,17 @@ test('a 401 from the profile clears the stored token', async () => {
   assert.equal(getRedToken(), null);
 });
 
+test('a late 401 for an old token keeps a newer login', async () => {
+  stored.set(RED_TOKEN_KEY, 'old-token');
+  let respond;
+  globalThis.fetch = () => new Promise(resolve => { respond = resolve; });
+  const pending = fetchRedProfile('old-token');
+  stored.set(RED_TOKEN_KEY, 'new-token');
+  respond(Response.json({ detail: 'Invalid token; please re-login' }, { status: 401 }));
+  await assert.rejects(pending, err => err instanceof ApiError && err.status === 401);
+  assert.equal(getRedToken(), 'new-token');
+});
+
 test('other profile errors keep the token', async () => {
   stored.set(RED_TOKEN_KEY, 'red-token');
   globalThis.fetch = async () => new Response('proxy failed', { status: 502 });
