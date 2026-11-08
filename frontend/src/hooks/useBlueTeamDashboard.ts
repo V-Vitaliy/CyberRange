@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { DefenseOption, SiemEvent } from '@/types/blue-team';
-import { ApiError, requestJson } from '@/api/blue-team';
+import { ApiError, requestJson } from '@/api/client';
 
 const API_BASE = process.env.NEXT_PUBLIC_BLUE_API_URL || 'http://127.0.0.1:8001/api/blue';
 const initialDefenses: DefenseOption[] = [
