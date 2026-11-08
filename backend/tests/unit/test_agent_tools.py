@@ -1,7 +1,6 @@
 """Agent tool registry: schemas, strict validation, handlers and SIEM audit."""
 
 import json
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
@@ -14,6 +13,8 @@ from app.agents.tools import registry
 from app.agents.tools.base import AgentTool, ToolResult
 from app.agents.tools.email_tool import send_email
 from app.chat import llm_engine
+from app.core.queue_manager import LLMQueueManager
+from tests.unit.test_llm_engine import ScriptedModel
 
 
 class TicketArguments(BaseModel):
@@ -34,17 +35,20 @@ def ticket_tool(monkeypatch):
     return handler
 
 
-async def chat(chunks):
-    async def stream(messages):
-        for chunk in chunks:
-            yield chunk
+@pytest.fixture(autouse=True)
+def turn_log(monkeypatch):
+    monkeypatch.setattr(llm_engine, "log_security_event", AsyncMock(), raising=False)
 
+
+async def chat(chunks):
+    """Run one agent turn whose first step plays `chunks`; return the model and the tool outcomes."""
+    scripted = ScriptedModel(chunks)
     model = Mock()
-    model.bind_tools.return_value = SimpleNamespace(astream=stream)
-    output = "".join(
-        [part async for part in llm_engine.generate_unified_stream(model, "system", "question", object(), uuid4())]
-    )
-    return model, output
+    model.bind_tools.return_value = scripted
+    events = [
+        event async for event in llm_engine.run_agent_turn(model, "system", "question", str(uuid4()), LLMQueueManager())
+    ]
+    return model, "".join(event["step"]["outcome"] for event in events if "step" in event)
 
 
 def call(name, args):

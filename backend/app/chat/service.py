@@ -6,7 +6,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.chat.llm_engine import generate_unified_stream
+from app.chat.llm_engine import run_agent_turn
 from app.chat.prompt_builder import PromptBuilder
 from app.chat.repository import ChatRepository
 from app.core.queue_manager import LLMQueueManager
@@ -76,7 +76,11 @@ async def generate_chat_response_sse(
             initial_prompt=prompt,
         )
 
-        lab_filter = {"lab_instance_id": str(session.lab_instance_id)}
+        lab_instance_id = str(session.lab_instance_id)
+        use_reranker = session.use_reranker
+        system_instruction = session.system_prompt
+
+        lab_filter = {"lab_instance_id": lab_instance_id}
         where = lab_filter if user.get("role") == "admin" else {"$and": [lab_filter, {"access_level": "public"}]}
 
         retrieved_docs = await asyncio.to_thread(vector_store.search_documents, prompt, n_results=5, where=where)
@@ -85,7 +89,7 @@ async def generate_chat_response_sse(
         if retrieved_docs and retrieved_docs.get("documents") and len(retrieved_docs["documents"]) > 0:
             context_texts = [doc for doc in retrieved_docs["documents"][0] if doc]
 
-        if session.use_reranker and context_texts:
+        if use_reranker and context_texts:
             scores = await asyncio.to_thread(_rerank, prompt, context_texts)
             scored_docs = list(zip(scores, context_texts))
             scored_docs.sort(key=lambda x: x[0], reverse=True)
@@ -95,31 +99,28 @@ async def generate_chat_response_sse(
 
         # EX-03: the lab's secret stays in context even after Prompt Patch replaces the instruction.
         secret = await get_exercise_secret(db, session.lab_instance_id, "EX-03")
+        # A turn can take many seconds: return the request's connection to the pool meanwhile.
+        await db.rollback()
 
         system_prompt, human_prompt = PromptBuilder.build_prompts(
             user_query=prompt,
             context_chunks=context_texts,
-            system_instruction=session.system_prompt,
+            system_instruction=system_instruction,
             username=clean_username,
             confidential_note=secret,
         )
 
-        async def llm_task():
-            async for chunk in generate_unified_stream(
-                llm_instance=llm_instance,
-                system_prompt=system_prompt,
-                human_prompt=human_prompt,
-                db=db,
-                lab_instance_id=str(session.lab_instance_id),
-            ):
-                yield chunk
-
         full_ai_response = ""
-
-        async for chunk in queue.stream_with_lock(llm_task):
-            if chunk:
-                full_ai_response += chunk
-                yield f"data: {json.dumps({'text': chunk})}\n\n"
+        async for event in run_agent_turn(
+            llm_instance=llm_instance,
+            system_prompt=system_prompt,
+            human_prompt=human_prompt,
+            lab_instance_id=lab_instance_id,
+            queue=queue,
+        ):
+            if event.get("text"):
+                full_ai_response += event["text"]
+            yield f"data: {json.dumps(event)}\n\n"
 
         await ChatRepository.append_messages(db=db, thread_id=thread_id, prompt=prompt, ai_response=full_ai_response)
 

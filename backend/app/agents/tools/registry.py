@@ -3,7 +3,6 @@ import uuid
 
 from langchain_core.messages import ToolCallChunk
 from langchain_core.tools import BaseTool
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.tools.base import AgentTool
 from app.agents.tools.email_tool import SEND_EMAIL
@@ -16,7 +15,7 @@ def tool_schemas() -> list[BaseTool]:
     return [tool.schema for tool in TOOLS.values()]
 
 
-async def execute_tool_call(call: ToolCallChunk, db: AsyncSession, lab_instance_id: str | uuid.UUID) -> str:
+async def execute_tool_call(call: ToolCallChunk, lab_instance_id: str | uuid.UUID) -> str:
     """Validate one completed tool call strictly, run its handler and audit the outcome."""
     name = call.get("name")
     agent_tool = TOOLS.get(name)

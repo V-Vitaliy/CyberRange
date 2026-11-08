@@ -88,9 +88,20 @@ Implemented in `auth/` (`service.py`, logins in `router.py`).
 
 - **Chat** (`POST /api/red/chat/ask`, SSE): authorize session → optional rate
   limit → Chroma search filtered by lab (public documents only unless `admin`)
-  → optional reranker → `PromptBuilder` → model stream through the shared queue
-  → tool calls via the tool registry → history saved. Errors return a generic
-  SSE message; details go to the server log.
+  → optional reranker → `PromptBuilder` → the request's transaction ends
+  (`db.rollback()`) → agent turn (`chat/llm_engine.run_agent_turn`) → history
+  saved. The agent turn is a loop: the model streams its answer or tool calls;
+  each tool call runs through the tool registry (strict argument validation,
+  one SIEM event per action) and its result goes back to the model as a
+  `ToolMessage` with the same `tool_call_id`; the loop repeats until the model
+  answers in text. At most `AGENT_MAX_STEPS` model calls run per turn; after
+  that the turn ends with a generic answer. Every executed tool call is sent
+  over SSE as `{"step": {"step", "tool", "arguments", "outcome"}}` (values
+  truncated to `AGENT_LOG_VALUE_CHARS`) next to the `{"text": ...}` tokens;
+  only the final text is saved in the history. A turn that called tools or hit
+  the limit ends with one `AGENT_TURN` SIEM event (`status`: `answered`,
+  `step_limit` or `error`, and the steps). Errors return a generic SSE
+  message; details go to the server log.
 - **Upload** (`POST /api/red/upload`): size and PDF magic-byte checks → object key
   resolved under the lab prefix → stored in S3 → files in `student_uploads/` are
   indexed by a background ETL job; progress is in Redis and streamed over
@@ -125,6 +136,11 @@ Implemented in `auth/` (`service.py`, logins in `router.py`).
     chunking, document embeddings and Chroma writes, so uploads cannot starve
     chat and login.
 - Chat and Auto-SOC share one model through `LLMQueueManager` (an asyncio lock).
+  A chat turn holds the lock only during each model call, not while its tools
+  run, so other chats and the Auto-SOC can use the model between agent steps.
+- A chat request ends its database transaction before the agent turn starts,
+  so a turn of several model calls does not hold a pooled connection; the
+  history is saved in a new short transaction at the end.
 
 ## Backend module map (`backend/app/`)
 
@@ -136,7 +152,7 @@ Implemented in `auth/` (`service.py`, logins in `router.py`).
 | `agents/` | `soc_agent.py` (LangGraph SOC analyst), `tools/` (tool registry: schema, risk level, audited handler; `send_email` with `email_service.py`) |
 | `db/` | `models.py`, `database.py`, `ids.py` (`ensure_uuid`) |
 | `auth/` | Users and login: `repository.py` (`UserRepository`), `service.py` (passwords, JWT, `authenticate`, `get_current_user_secure`, `get_blue_team_user`, `get_current_user_vulnerable`, `dummy_password_hash`), `router.py` (Red and Blue `POST /login`, Blue `GET /me`), `schemas.py` |
-| `chat/` | Red Team chat: `repository.py` (`ChatRepository`), `service.py` (RAG pipeline and SSE, thread lookup, history search), `llm_engine.py` (model streaming), `prompt_builder.py`, `sqli_isolation.py` and `sqli_search.py` (lab-isolated SQLi exercise), `router.py` (`/chat/ask`, `/chat/history`), `schemas.py` |
+| `chat/` | Red Team chat: `repository.py` (`ChatRepository`), `service.py` (RAG pipeline and SSE, thread lookup, history search), `llm_engine.py` (agent loop: model steps and tool calls), `prompt_builder.py`, `sqli_isolation.py` and `sqli_search.py` (lab-isolated SQLi exercise), `router.py` (`/chat/ask`, `/chat/history`), `schemas.py` |
 | `ctf/` | Flag submission: `repository.py` (`CtfRepository`), `service.py` (`hash_ctf_flag`, `submit_flag`), `router.py` (`POST /api/red/ctf/submit`), `schemas.py` |
 | `defense/` | Defense shop and rate limit: `service.py` (`process_defense_purchase`, `enforce_rate_limit`, `enforce_login_attempt_limit`), `router.py` (`POST /api/blue/defenses/buy`), `schemas.py` |
 | `documents/` | Uploads and RAG documents: `service.py` (`ETLWorker`: PDF parsing, chunking, embedding), `object_store.py` (S3 uploads, lab-prefixed keys), `chroma_client.py` (`VectorStore`), `router.py` (`POST /api/red/upload`, `/api/red/ws/etl-status/{task_id}`) |

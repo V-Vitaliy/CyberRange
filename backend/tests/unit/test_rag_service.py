@@ -15,6 +15,11 @@ from app.core.queue_manager import LLMQueueManager
 from app.db.models import GameSession
 
 
+def request_db():
+    """The request's session; the service ends its read transaction before the model runs."""
+    return SimpleNamespace(rollback=AsyncMock())
+
+
 @pytest.fixture(autouse=True)
 def no_exercise_secret(monkeypatch):
     lookup = AsyncMock(return_value=None)
@@ -32,15 +37,15 @@ async def test_rag_limits_both_roles_to_their_lab(monkeypatch, role):
     monkeypatch.setattr(ChatRepository, "append_messages", AsyncMock())
 
     async def stream(**kwargs):
-        yield "test response"
+        yield {"text": "test response"}
 
-    monkeypatch.setattr(rag_service, "generate_unified_stream", stream)
+    monkeypatch.setattr(rag_service, "run_agent_turn", stream)
     store = SimpleNamespace(search_documents=Mock(return_value={"documents": [[]]}))
     user = dict(id=str(uuid4()), sub="student", role=role, lab_instance_id=str(lab_id))
     result = [
         part
         async for part in rag_service.generate_chat_response_sse(
-            object(), uuid4(), uuid4(), "question", LLMQueueManager(), store, user, object()
+            request_db(), uuid4(), uuid4(), "question", LLMQueueManager(), store, user, object()
         )
     ]
     where = store.search_documents.call_args.kwargs["where"]
@@ -70,9 +75,9 @@ async def test_reranker_switch_and_system_prompt_reach_generation(monkeypatch, e
 
     async def stream(**kwargs):
         captured.update(kwargs)
-        yield "answer"
+        yield {"text": "answer"}
 
-    monkeypatch.setattr(rag_service, "generate_unified_stream", stream)
+    monkeypatch.setattr(rag_service, "run_agent_turn", stream)
     store = SimpleNamespace(
         search_documents=Mock(return_value={"documents": [["discarded context", "retained context"]]})
     )
@@ -80,7 +85,7 @@ async def test_reranker_switch_and_system_prompt_reach_generation(monkeypatch, e
     parts = [
         part
         async for part in rag_service.generate_chat_response_sse(
-            object(), uuid4(), uuid4(), "question", LLMQueueManager(), store, user, object()
+            request_db(), uuid4(), uuid4(), "question", LLMQueueManager(), store, user, object()
         )
     ]
     assert parts[-1] == "data: [DONE]\n\n"
@@ -91,46 +96,63 @@ async def test_reranker_switch_and_system_prompt_reach_generation(monkeypatch, e
 
 
 @pytest.mark.asyncio
-async def test_chat_sse_records_simulated_tool_result_and_history(harness, monkeypatch):
-    from app.chat import service as rag_service
-    from app.chat.repository import ChatRepository
-    from app.core.queue_manager import LLMQueueManager
+async def test_chat_sse_streams_agent_steps_and_saves_the_final_answer(harness, monkeypatch):
+    from app.chat import llm_engine
+    from tests.unit.test_llm_engine import EMAIL, ScriptedModel, tool_chunk
 
     audit, delivery = harness
+    monkeypatch.setattr(llm_engine, "log_security_event", AsyncMock(), raising=False)
     lab_id = uuid4()
     session = SimpleNamespace(lab_instance_id=lab_id, use_reranker=False, system_prompt="test")
     monkeypatch.setattr(rag_service, "get_authorized_session", AsyncMock(return_value=session))
     monkeypatch.setattr(ChatRepository, "get_or_create_thread", AsyncMock())
     history = AsyncMock()
     monkeypatch.setattr(ChatRepository, "append_messages", history)
-
-    async def stream(messages):
-        yield AIMessageChunk(
-            content="",
-            tool_call_chunks=[
-                {
-                    "name": "send_email",
-                    "id": "call1",
-                    "index": 0,
-                    "args": json.dumps(dict(to_address="test@example.invalid", subject="Test", body="test")),
-                }
-            ],
-        )
-
     model = Mock()
-    model.bind_tools.return_value = SimpleNamespace(astream=stream)
+    model.bind_tools.return_value = ScriptedModel([tool_chunk(EMAIL)], [AIMessageChunk(content="I tried.")])
     user = dict(id=str(uuid4()), sub="student", role="red_team", lab_instance_id=str(lab_id))
     store = SimpleNamespace(search_documents=Mock(return_value={"documents": [[]]}))
     parts = [
         part
         async for part in rag_service.generate_chat_response_sse(
-            object(), uuid4(), uuid4(), "Send a test email", LLMQueueManager(), store, user, model
+            request_db(), uuid4(), uuid4(), "Send a test email", LLMQueueManager(), store, user, model
         )
     ]
     assert parts[-1] == "data: [DONE]\n\n"
-    assert "No email was sent" in history.call_args.kwargs["ai_response"]
+    messages = [json.loads(part[6:]) for part in parts[:-1]]
+    [step] = [message["step"] for message in messages if "step" in message]
+    assert (step["step"], step["tool"]) == (1, "send_email")
+    assert "No email was sent" in step["outcome"]
+    assert "".join(message.get("text", "") for message in messages) == "I tried."
+    assert history.call_args.kwargs["ai_response"] == "I tried."
     assert audit.call_args.kwargs["lab_instance_id"] == str(lab_id)
     delivery.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_request_transaction_ends_before_the_model_runs(monkeypatch):
+    """A turn can take many seconds: holding the request's connection meanwhile would exhaust the pool."""
+    session = SimpleNamespace(lab_instance_id=uuid4(), use_reranker=False, system_prompt="test")
+    monkeypatch.setattr(rag_service, "get_authorized_session", AsyncMock(return_value=session))
+    monkeypatch.setattr(ChatRepository, "get_or_create_thread", AsyncMock())
+    history = AsyncMock()
+    monkeypatch.setattr(ChatRepository, "append_messages", history)
+    db = request_db()
+    seen = []
+
+    async def stream(**kwargs):
+        seen.append(db.rollback.await_count)
+        yield {"text": "answer"}
+
+    monkeypatch.setattr(rag_service, "run_agent_turn", stream)
+    store = SimpleNamespace(search_documents=Mock(return_value={"documents": [[]]}))
+    user = dict(id=str(uuid4()), sub="student", role="red_team", lab_instance_id=str(session.lab_instance_id))
+    async for _ in rag_service.generate_chat_response_sse(
+        db, uuid4(), uuid4(), "question", LLMQueueManager(), store, user, object()
+    ):
+        pass
+    assert seen == [1]
+    history.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -157,7 +179,7 @@ async def test_empty_chat_emits_sse_error_without_saving_success(harness, monkey
     parts = [
         part
         async for part in rag_service.generate_chat_response_sse(
-            object(), uuid4(), uuid4(), "Question", LLMQueueManager(), store, user, model
+            request_db(), uuid4(), uuid4(), "Question", LLMQueueManager(), store, user, model
         )
     ]
     assert parts[-1] == "data: [DONE]\n\n"
@@ -179,13 +201,13 @@ async def test_chat_failure_hides_internal_details_from_client(monkeypatch, capl
         raise RuntimeError(internal)
         yield
 
-    monkeypatch.setattr(rag_service, "generate_unified_stream", stream)
+    monkeypatch.setattr(rag_service, "run_agent_turn", stream)
     store = SimpleNamespace(search_documents=Mock(return_value={"documents": [[]]}))
     user = dict(id=str(uuid4()), sub="student", role="red_team", lab_instance_id=str(session.lab_instance_id))
     parts = [
         part
         async for part in rag_service.generate_chat_response_sse(
-            object(), uuid4(), uuid4(), "question", LLMQueueManager(), store, user, object()
+            request_db(), uuid4(), uuid4(), "question", LLMQueueManager(), store, user, object()
         )
     ]
     assert parts[-1] == "data: [DONE]\n\n"
@@ -203,9 +225,9 @@ async def test_document_search_runs_off_the_event_loop(monkeypatch):
     monkeypatch.setattr(ChatRepository, "append_messages", AsyncMock())
 
     async def stream(**kwargs):
-        yield "answer"
+        yield {"text": "answer"}
 
-    monkeypatch.setattr(rag_service, "generate_unified_stream", stream)
+    monkeypatch.setattr(rag_service, "run_agent_turn", stream)
     threads = []
 
     def search(*args, **kwargs):
@@ -218,7 +240,7 @@ async def test_document_search_runs_off_the_event_loop(monkeypatch):
     parts = [
         part
         async for part in rag_service.generate_chat_response_sse(
-            object(), uuid4(), uuid4(), "question", LLMQueueManager(), store, user, object()
+            request_db(), uuid4(), uuid4(), "question", LLMQueueManager(), store, user, object()
         )
     ]
     assert parts[-1] == "data: [DONE]\n\n"
@@ -234,9 +256,9 @@ async def test_reranker_loading_and_scoring_run_off_the_event_loop(monkeypatch):
     monkeypatch.setattr(ChatRepository, "append_messages", AsyncMock())
 
     async def stream(**kwargs):
-        yield "answer"
+        yield {"text": "answer"}
 
-    monkeypatch.setattr(rag_service, "generate_unified_stream", stream)
+    monkeypatch.setattr(rag_service, "run_agent_turn", stream)
     threads = {}
 
     def predict(pairs):
@@ -253,7 +275,7 @@ async def test_reranker_loading_and_scoring_run_off_the_event_loop(monkeypatch):
     parts = [
         part
         async for part in rag_service.generate_chat_response_sse(
-            object(), uuid4(), uuid4(), "question", LLMQueueManager(), store, user, object()
+            request_db(), uuid4(), uuid4(), "question", LLMQueueManager(), store, user, object()
         )
     ]
     assert parts[-1] == "data: [DONE]\n\n"
@@ -293,12 +315,12 @@ async def test_ex03_secret_reaches_the_model_even_after_prompt_patch(monkeypatch
 
     async def stream(**kwargs):
         captured.update(kwargs)
-        yield "answer"
+        yield {"text": "answer"}
 
-    monkeypatch.setattr(rag_service, "generate_unified_stream", stream)
+    monkeypatch.setattr(rag_service, "run_agent_turn", stream)
     store = SimpleNamespace(search_documents=Mock(return_value={"documents": [[]]}))
     user = dict(id=str(uuid4()), sub="student", role="red_team", lab_instance_id=str(session.lab_instance_id))
-    db = object()
+    db = request_db()
     async for _ in rag_service.generate_chat_response_sse(
         db, uuid4(), uuid4(), "question", LLMQueueManager(), store, user, object()
     ):
