@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 import re
@@ -6,6 +5,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agents.tools.base import ToolContext
 from app.chat.llm_engine import run_agent_turn
 from app.chat.prompt_builder import PromptBuilder
 from app.chat.repository import ChatRepository
@@ -16,8 +16,6 @@ from app.labs.service import get_authorized_session, get_exercise_secret
 logger = logging.getLogger(__name__)
 
 CHAT_ERROR_MESSAGE = "The assistant could not answer. Please try again."
-
-_reranker = None
 
 
 async def get_or_create_thread(db: AsyncSession, thread_id, user_id, session_id, initial_prompt: str):
@@ -35,20 +33,6 @@ async def add_seeded_thread(db: AsyncSession, user_id, session_id, title: str, m
 async def search_chat_history(lab_id, session_id, query):
     """Intentionally injectable history search, run by the lab's isolated reader."""
     return await ChatRepository.search_chat_history_vulnerable(lab_id, session_id, query)
-
-
-def get_reranker():
-    global _reranker
-    if _reranker is None:
-        from sentence_transformers import CrossEncoder
-
-        _reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", max_length=512)
-    return _reranker
-
-
-def _rerank(prompt: str, documents: list[str]):
-    # Runs in a worker thread: the first call also loads the model.
-    return get_reranker().predict([[prompt, doc] for doc in documents])
 
 
 async def generate_chat_response_sse(
@@ -80,21 +64,6 @@ async def generate_chat_response_sse(
         use_reranker = session.use_reranker
         system_instruction = session.system_prompt
 
-        lab_filter = {"lab_instance_id": lab_instance_id}
-        where = lab_filter if user.get("role") == "admin" else {"$and": [lab_filter, {"access_level": "public"}]}
-
-        retrieved_docs = await asyncio.to_thread(vector_store.search_documents, prompt, n_results=5, where=where)
-        context_texts = []
-
-        if retrieved_docs and retrieved_docs.get("documents") and len(retrieved_docs["documents"]) > 0:
-            context_texts = [doc for doc in retrieved_docs["documents"][0] if doc]
-
-        if use_reranker and context_texts:
-            scores = await asyncio.to_thread(_rerank, prompt, context_texts)
-            scored_docs = list(zip(scores, context_texts))
-            scored_docs.sort(key=lambda x: x[0], reverse=True)
-            context_texts = [doc for score, doc in scored_docs[:2] if score > 0]
-
         clean_username = re.sub(r"[^a-zA-Z0-9_]", "", user.get("sub", "Guest")) or "Guest"
 
         # EX-03: the lab's secret stays in context even after Prompt Patch replaces the instruction.
@@ -104,7 +73,6 @@ async def generate_chat_response_sse(
 
         system_prompt, human_prompt = PromptBuilder.build_prompts(
             user_query=prompt,
-            context_chunks=context_texts,
             system_instruction=system_instruction,
             username=clean_username,
             confidential_note=secret,
@@ -115,7 +83,12 @@ async def generate_chat_response_sse(
             llm_instance=llm_instance,
             system_prompt=system_prompt,
             human_prompt=human_prompt,
-            lab_instance_id=lab_instance_id,
+            context=ToolContext(
+                lab_instance_id=lab_instance_id,
+                role=user.get("role", ""),
+                use_reranker=use_reranker,
+                vector_store=vector_store,
+            ),
             queue=queue,
         ):
             if event.get("text"):

@@ -4,7 +4,7 @@ import logging
 from langchain_core.tools import tool
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.agents.tools.base import AgentTool, ToolResult
+from app.agents.tools.base import AgentTool, ToolContext, ToolResult
 from app.agents.tools.email_service import EmailService
 from app.core.config import settings
 
@@ -25,7 +25,7 @@ def send_email(to_address: str, subject: str, body: str) -> str:
     raise RuntimeError("Email tools must execute through the audited tool registry")
 
 
-async def handle_send_email(args: EmailArguments) -> ToolResult:
+async def handle_send_email(args: EmailArguments, context: ToolContext) -> ToolResult:
     simulated = not settings.SMTP_HOST
     if not simulated and not EmailService.recipient_allowed(args.to_address):
         # Real delivery never leaves the lab mail domains.

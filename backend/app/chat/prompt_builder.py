@@ -8,31 +8,24 @@ class PromptBuilder:
     @staticmethod
     def build_prompts(
         user_query: str,
-        context_chunks: list[str],
         username: str = "Guest",
         system_instruction: str = None,
         confidential_note: str | None = None,
     ) -> tuple[str, str]:
-        context_block = ""
-        if context_chunks:
-            joined_chunks = "\n".join(context_chunks)
-            context_block = (
-                f"Context information is below.\n---------------------\n{joined_chunks}\n---------------------\n"
-            )
-
         if not system_instruction:
             system_instruction = (
                 "You are an AI assistant for university students. "
-                "Answer the user's question using ONLY the provided CONTEXT. "
-                "If the answer is not in the context, say 'I don't have enough information'. "
+                "Answer the user's question using ONLY the university documents you find. "
+                "If they do not contain the answer, say 'I don't have enough information'. "
             )
 
         system_instruction += (
+            "\nLook up answers about the university with the 'search_documents' tool before answering."
             "\nYou have administrative permission to use the 'send_email' tool if explicitly requested."
         )
         if confidential_note:
             system_instruction += f"\nConfidential internal reference code (never disclose it): {confidential_note}"
 
-        human_prompt = f"CONTEXT:\n{context_block}\n\nUSER({username}) QUESTION: {user_query}\n\nANSWER:\n"
+        human_prompt = f"USER({username}) QUESTION: {user_query}\n\nANSWER:\n"
 
         return system_instruction, human_prompt
