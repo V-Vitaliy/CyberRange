@@ -144,8 +144,20 @@ Implemented in `auth/` (`service.py`, logins in `router.py`).
   - dedicated ETL pool (`ETL_MAX_WORKERS`, threads `etl-*`): PDF parsing,
     chunking, document embeddings and Chroma writes, so uploads cannot starve
     chat and login.
-- Chat and Auto-SOC share one model through `LLMQueueManager` (an asyncio lock).
-  A chat turn holds the lock only during each model call, not while its tools
+- Chat and Auto-SOC share the model through `LLMQueueManager`: at most
+  `LLM_MAX_CONCURRENCY` generations run at once (`model_slots`, a semaphore)
+  and at most `LLM_MAX_CONCURRENCY_PER_LAB` of them for one lab. A call takes
+  its lab's slot first, then a shared one, so requests over a lab's share wait
+  without holding a shared slot and never delay another lab. Chat passes the
+  lab of the turn, the Auto-SOC the lab of the event; the SOC worker analyzes
+  one event at a time, so it holds at most one slot and needs no priority.
+  Waiting requests form one bounded queue (50 requests; 503 when full) with a
+  300-second wait limit (504).
+- The in-process GGUF model has one llama.cpp context and runs one generation
+  at a time: the API refuses to start with `LLM_MAX_CONCURRENCY` above 1. To
+  serve several players at once, run a model server with parallel slots
+  (`LOCAL_RUN.md`) and set `LLM_MAX_CONCURRENCY` to their number.
+- A chat turn holds a slot only during each model call, not while its tools
   run, so other chats and the Auto-SOC can use the model between agent steps.
 - A chat request ends its database transaction before the agent turn starts,
   so a turn of several model calls does not hold a pooled connection; the

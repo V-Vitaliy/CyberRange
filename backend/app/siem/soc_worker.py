@@ -44,11 +44,16 @@ def is_connection_error(error: BaseException | None) -> bool:
     return False
 
 
-async def fetch_pending_logs() -> list[tuple[UUID, str, dict]]:
+async def fetch_pending_logs() -> list[tuple[UUID, UUID, str, dict]]:
     """Read a batch of uninvestigated solo-lab events; the transaction ends before analysis."""
     async with async_session() as db:
         result = await db.execute(
-            select(SecurityAuditLog.id, SecurityAuditLog.event_type, SecurityAuditLog.payload)
+            select(
+                SecurityAuditLog.id,
+                SecurityAuditLog.lab_instance_id,
+                SecurityAuditLog.event_type,
+                SecurityAuditLog.payload,
+            )
             .join(GameSession, SecurityAuditLog.lab_instance_id == GameSession.lab_instance_id)
             .where(
                 SecurityAuditLog.investigated_at.is_(None),
@@ -134,7 +139,7 @@ async def run_soc_analyst_loop(soc_graph, queue):
             # The model analysis below does not depend on this step.
             logger.exception("[SOC Worker] Rule-based verdicts failed; retrying on the next poll")
         try:
-            for log_id, event_type, payload in await fetch_pending_logs():
+            for log_id, lab_instance_id, event_type, payload in await fetch_pending_logs():
                 initial_state = {
                     "log_id": str(log_id),
                     "event_type": event_type,
@@ -143,8 +148,8 @@ async def run_soc_analyst_loop(soc_graph, queue):
                     "reasoning": "",
                 }
                 try:
-                    # The local SOC and chat share the same GPU/model instance.
-                    async with queue.gpu_lock:
+                    # Chat and the SOC share the model; the analysis counts against the event's lab.
+                    async with queue.turn(str(lab_instance_id)):
                         final_state = await soc_graph.ainvoke(initial_state)
                     verdict = AnalysisOutput.model_validate(final_state)
                 except Exception as error:
