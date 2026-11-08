@@ -278,16 +278,17 @@ npm ci
 npm run dev
 ```
 
-By default, the dashboard calls `http://127.0.0.1:8001/api/blue`. For a different address, set `NEXT_PUBLIC_BLUE_API_URL` in `frontend/.env.local` using `frontend/.env.example` as a guide, then restart Next.js. For a production build, set this address before `npm run build`.
+By default, the dashboards call `http://127.0.0.1:8001/api/blue` and `http://127.0.0.1:8001/api/red`. For a different address, set `NEXT_PUBLIC_BLUE_API_URL` and `NEXT_PUBLIC_RED_API_URL` in `frontend/.env.local` using `frontend/.env.example` as a guide, then restart Next.js. For a production build, set these addresses before `npm run build`.
 
 - Dashboard: `http://localhost:3000/blue-team/dashboard`.
+- Red Team login and session: `http://localhost:3000/red-team`.
 - Red Team API/Swagger: `http://127.0.0.1:8001/api/red/docs`.
 - Blue Team API/Swagger: `http://127.0.0.1:8001/api/blue/docs`.
 - Basic health: `http://127.0.0.1:8001/api/health`; this alone does not establish that all services work.
 
 After login, the dashboard gets the session ID from `/api/blue/me`. The `?session_id=...` parameter is still supported; the backend checks session ownership. If no session exists yet, the dashboard displays a message asking for database setup.
 
-Red Team uses the API. For protected requests, pass `Authorization: Bearer <access_token>` using the token returned by login. There is no separate browser-based Red Team chat yet. Old tokens without `lab_scope` require a new login.
+Red Team uses the API. For protected requests, pass `Authorization: Bearer <access_token>` using the token returned by login. The Red Team page logs in and shows the lab's session ID from `/api/red/me`; there is no browser-based Red Team chat yet. Old tokens without `lab_scope` require a new login.
 
 In Swagger, first call `/login`, copy only the returned `access_token` value,
 then click **Authorize** and paste that token **without** the `Bearer` prefix.

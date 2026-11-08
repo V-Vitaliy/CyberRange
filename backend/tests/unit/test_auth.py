@@ -295,10 +295,10 @@ async def test_hardened_login_releases_the_request_connection_before_the_limiter
     login_lab.limit.assert_awaited_once()
 
 
-def test_auth_routers_hold_login_and_blue_profile():
+def test_auth_routers_hold_login_and_profile():
     from app.auth.router import blue_router, red_router
 
-    assert [(route.path, route.methods) for route in red_router.routes] == [("/login", {"POST"})]
+    assert [(route.path, route.methods) for route in red_router.routes] == [("/login", {"POST"}), ("/me", {"GET"})]
     assert [(route.path, route.methods) for route in blue_router.routes] == [("/login", {"POST"}), ("/me", {"GET"})]
 
 

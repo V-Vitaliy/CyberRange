@@ -23,7 +23,7 @@ export default function Home() {
 
         <div className="flex flex-col md:flex-row gap-8 justify-center items-center">
           <button
-            onClick={() => router.push('/red-team/chat')}
+            onClick={() => router.push('/red-team')}
             className="group bg-neutral-900 border border-neutral-800 p-10 rounded-2xl hover:border-red-500/40 transition-all w-72 text-left"
           >
             <div className="w-12 h-12 bg-red-500/10 text-red-500 rounded-lg flex items-center justify-center mb-6">

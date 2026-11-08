@@ -336,3 +336,79 @@ async def test_etl_socket_passes_its_connection_to_authentication(monkeypatch):
     await documents_router.etl_status_websocket(socket, uuid4(), AsyncMock(), db)
     auth.assert_awaited_once_with("Bearer forged", db, socket)
     socket.close.assert_awaited_once_with(code=1008)
+
+
+@pytest.fixture
+def red_profile(monkeypatch):
+    """A red student and the session of their lab; other labs have sessions too."""
+    from app.auth.repository import UserRepository
+
+    user = SimpleNamespace(id=uuid4(), username="red-student", role="red_team", lab_instance_id=uuid4())
+    own = SimpleNamespace(id=uuid4(), lab_instance_id=user.lab_instance_id, jwt_filter_enabled=False)
+    foreign = SimpleNamespace(id=uuid4(), lab_instance_id=uuid4(), jwt_filter_enabled=False)
+    sessions = {str(own.lab_instance_id): own, str(foreign.lab_instance_id): foreign}
+    lookup = AsyncMock(side_effect=lambda db, lab: sessions.get(str(lab)))
+    monkeypatch.setattr(UserRepository, "get_by_id", AsyncMock(return_value=user))
+    monkeypatch.setattr(GameSessionRepository, "get_by_lab_instance_id", lookup)
+    monkeypatch.setattr("app.auth.service.log_jwt_manipulation_attempt", AsyncMock())
+
+    async def database():
+        yield object()
+
+    prior = dict(red_app.dependency_overrides)
+    red_app.dependency_overrides[get_db] = database
+    yield SimpleNamespace(user=user, own=own, foreign=foreign, lookup=lookup)
+    red_app.dependency_overrides.clear()
+    red_app.dependency_overrides.update(prior)
+
+
+def _red_token(user, **outer):
+    import jwt
+
+    from app.auth.service import create_access_token
+
+    token = create_access_token(
+        dict(sub=user.username, role=user.role, id=str(user.id), lab_instance_id=str(user.lab_instance_id))
+    )
+    if not outer:
+        return token
+    payload = jwt.decode(token, options={"verify_signature": False})
+    payload.update(outer)
+    return jwt.encode(payload, None, algorithm="none")
+
+
+@pytest.mark.asyncio
+async def test_red_profile_returns_the_session_of_the_students_own_lab(client, red_profile):
+    token = _red_token(red_profile.user)
+    response = await client.get("/api/red/me", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    assert response.json() == {
+        "username": "red-student",
+        "role": "red_team",
+        "session_id": str(red_profile.own.id),
+    }
+
+
+@pytest.mark.asyncio
+async def test_red_profile_requires_a_bearer_token(client, red_profile):
+    response = await client.get("/api/red/me")
+    assert response.status_code == 401
+    red_profile.lookup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_red_profile_never_returns_another_labs_session(client, red_profile):
+    token = _red_token(red_profile.user, lab_instance_id=str(red_profile.foreign.lab_instance_id))
+    response = await client.get("/api/red/me", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 401
+    assert str(red_profile.foreign.id) not in response.text
+    looked_up = {str(call.args[1]) for call in red_profile.lookup.await_args_list}
+    assert str(red_profile.foreign.lab_instance_id) not in looked_up
+
+
+@pytest.mark.asyncio
+async def test_forged_role_still_gets_only_its_own_labs_session(client, red_profile):
+    token = _red_token(red_profile.user, role="admin")
+    response = await client.get("/api/red/me", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    assert response.json()["session_id"] == str(red_profile.own.id)

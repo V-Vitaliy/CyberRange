@@ -106,6 +106,7 @@ async def test_unsupported_local_soc_does_not_prevent_local_api_startup(monkeypa
     "sub_app,path,method",
     [
         (red_app, "/ctf/submit", "post"),
+        (red_app, "/me", "get"),
         (blue_app, "/me", "get"),
     ],
 )

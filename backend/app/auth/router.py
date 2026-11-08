@@ -6,7 +6,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.schemas import LoginRequest, TokenResponse
-from app.auth.service import authenticate, create_access_token, get_blue_team_user
+from app.auth.service import (
+    authenticate,
+    create_access_token,
+    get_blue_team_user,
+    get_current_user_vulnerable,
+)
 from app.db.database import get_db
 from app.db.models import User
 from app.labs.service import get_session_for_lab, lab_from_login_code
@@ -53,6 +58,20 @@ async def red_team_login(login_req: LoginRequest, request: Request, db: AsyncSes
     )
 
     return {"access_token": token, "token_type": "bearer", "role": user.role}
+
+
+@red_router.get("/me", tags=["Red Team Auth"])
+async def get_red_team_profile(
+    current_user: dict = Depends(get_current_user_vulnerable),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the authenticated student and the session of their own laboratory."""
+    session = await get_session_for_lab(db, current_user["lab_instance_id"])
+    return {
+        "username": current_user["sub"],
+        "role": current_user["role"],
+        "session_id": str(session.id) if session else None,
+    }
 
 
 @blue_router.post("/login", response_model=TokenResponse, tags=["Blue Team - User"])
