@@ -3,7 +3,7 @@ import React, { createContext, useContext, useState, ReactNode } from 'react';
 
 type Language = 'en' | 'pl';
 
-const DICTIONARY = {
+export const DICTIONARY = {
   en: {
     selectTeam: "Select Your Team",
     redTeamDesc: "Attack and test LLM vulnerabilities",
@@ -11,9 +11,15 @@ const DICTIONARY = {
     loginTitle: "SOC Authentication",
     loginSub: "Access the CyberRange environment",
     redLoginTitle: "Red Team Authentication",
-    redSessionTitle: "Lab Session",
     sessionId: "Session ID",
     noSession: "No game session in this laboratory yet",
+    threadsTitle: "Threads",
+    newThread: "New thread",
+    noThreads: "No threads yet",
+    chatEmpty: "Ask the lab assistant a question...",
+    chatPlaceholder: "Type your prompt...",
+    sendBtn: "Send",
+    agentStep: "Step",
     labCode: "Lab code",
     username: "Username",
     password: "Password",
@@ -41,9 +47,15 @@ const DICTIONARY = {
     loginTitle: "Autoryzacja SOC",
     loginSub: "Uzyskaj dostęp do środowiska CyberRange",
     redLoginTitle: "Autoryzacja Red Team",
-    redSessionTitle: "Sesja laboratorium",
     sessionId: "ID sesji",
     noSession: "To laboratorium nie ma jeszcze sesji gry",
+    threadsTitle: "Wątki",
+    newThread: "Nowy wątek",
+    noThreads: "Brak wątków",
+    chatEmpty: "Zadaj pytanie asystentowi laboratorium...",
+    chatPlaceholder: "Wpisz polecenie...",
+    sendBtn: "Wyślij",
+    agentStep: "Krok",
     labCode: "Kod laboratorium",
     username: "Użytkownik",
     password: "Hasło",

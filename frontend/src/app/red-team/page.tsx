@@ -5,6 +5,7 @@ import { Terminal, RefreshCw, Globe, LogOut, ArrowLeft } from 'lucide-react';
 
 import { useLanguage } from '@/context/LanguageContext';
 import { useRedTeamSession } from '@/hooks/useRedTeamSession';
+import ChatPanel from '@/components/red-team/ChatPanel';
 
 export default function RedTeamPage() {
   const router = useRouter();
@@ -54,33 +55,31 @@ export default function RedTeamPage() {
         <button onClick={() => setLang(lang === 'pl' ? 'en' : 'pl')} className="flex items-center gap-2 text-neutral-500 hover:text-white text-[10px] font-bold uppercase tracking-widest">
           <Globe size={14} /> {lang}
         </button>
-        <button onClick={logout} title={t.logout} className="text-neutral-500 hover:text-white p-2">
-          <LogOut size={18} />
-        </button>
+        <div className="flex items-center gap-4">
+          {profile && (
+            <span className="text-[10px] text-neutral-500 font-mono">
+              {profile.username} · {t.sessionId}: <span className="text-red-400">{profile.session_id ?? '-'}</span>
+            </span>
+          )}
+          <button onClick={logout} title={t.logout} className="text-neutral-500 hover:text-white p-2">
+            <LogOut size={18} />
+          </button>
+        </div>
       </header>
 
-      <main className="flex-1 flex items-center justify-center p-6">
-        <section className="max-w-md w-full bg-neutral-900 border border-neutral-800 rounded-2xl p-8 space-y-4">
-          <h2 className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest flex items-center gap-2">
-            <Terminal size={14} className="text-red-500" /> {t.redSessionTitle}
-          </h2>
-          {error && <p role="alert" className="text-red-400 text-xs">{error}</p>}
-          {profile ? (
-            <dl className="space-y-3 text-sm">
-              <div>
-                <dt className="text-[10px] text-neutral-500 uppercase font-bold tracking-widest">{t.username}</dt>
-                <dd className="text-white font-mono">{profile.username}</dd>
-              </div>
-              <div>
-                <dt className="text-[10px] text-neutral-500 uppercase font-bold tracking-widest">{t.sessionId}</dt>
-                <dd className="text-red-400 font-mono break-all">{profile.session_id ?? t.noSession}</dd>
-              </div>
-            </dl>
+      {profile?.session_id ? (
+        <ChatPanel key={profile.session_id} token={token} sessionId={profile.session_id} onUnauthorized={logout} />
+      ) : (
+        <main className="flex-1 flex items-center justify-center p-6">
+          {error ? (
+            <p role="alert" className="text-red-400 text-xs">{error}</p>
+          ) : profile ? (
+            <p className="text-neutral-500 text-xs">{t.noSession}</p>
           ) : (
-            !error && <RefreshCw className="animate-spin text-neutral-600" size={18} />
+            <RefreshCw className="animate-spin text-neutral-600" size={18} />
           )}
-        </section>
-      </main>
+        </main>
+      )}
     </div>
   );
 }

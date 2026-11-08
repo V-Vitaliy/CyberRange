@@ -28,12 +28,16 @@ export async function loginRedTeam(username: string, password: string, labCode: 
   return data.access_token;
 }
 
+export function forgetRejectedToken(err: unknown, token: string): void {
+  // A late 401 for an old token must not erase a newer login.
+  if (err instanceof ApiError && err.status === 401 && getRedToken() === token) clearRedToken();
+}
+
 export async function fetchRedProfile(token: string): Promise<RedProfile> {
   try {
     return await requestJson<RedProfile>(`${RED_API_BASE}/me`, { headers: { Authorization: `Bearer ${token}` } });
   } catch (err) {
-    // A late 401 for an old token must not erase a newer login.
-    if (err instanceof ApiError && err.status === 401 && getRedToken() === token) clearRedToken();
+    forgetRejectedToken(err, token);
     throw err;
   }
 }
