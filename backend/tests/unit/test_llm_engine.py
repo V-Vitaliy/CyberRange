@@ -55,7 +55,7 @@ async def run_stream(chunks):
     return text(events) + "".join(step["outcome"] for step in steps(events))
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def turn_log(monkeypatch):
     log = AsyncMock()
     monkeypatch.setattr(llm_engine, "log_security_event", log, raising=False)
