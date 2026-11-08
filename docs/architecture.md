@@ -94,7 +94,9 @@ Implemented in `auth/` (`service.py`, logins in `router.py`).
   model streams its answer or tool calls; each tool call runs through the
   tool registry (strict argument validation, one SIEM event per action) and
   its result goes back to the model as a `ToolMessage` with the same
-  `tool_call_id`; the loop repeats until the model answers in text. At most `AGENT_MAX_STEPS` model calls run per turn; after
+  `tool_call_id`; the loop repeats until the model answers in text. A tool
+  that fails is logged as `AI_TOOL_FAILED` and reported to the model as a
+  generic failure; details go to the server log. At most `AGENT_MAX_STEPS` model calls run per turn; after
   that the turn ends with a generic answer. Every executed tool call is sent
   over SSE as `{"step": {"step", "tool", "arguments", "outcome"}}` (values
   truncated to `AGENT_LOG_VALUE_CHARS`) next to the `{"text": ...}` tokens;
