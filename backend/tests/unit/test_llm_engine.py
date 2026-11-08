@@ -358,3 +358,17 @@ async def test_document_search_result_goes_back_to_the_model(harness, turn_log):
     assert isinstance(result, ToolMessage) and "Exams start on Monday." in result.content
     assert text(events) == "On Monday."
     assert [step["tool"] for step in steps(events)] == ["search_documents"]
+
+
+@pytest.mark.asyncio
+async def test_tool_failure_on_the_first_step_is_part_of_the_turn(harness, turn_log):
+    store = SimpleNamespace(search_documents=Mock(side_effect=RuntimeError("Chroma unavailable")))
+    turn = ToolContext(lab_instance_id=LAB, role="red_team", use_reranker=False, vector_store=store)
+    search = tool_chunk(json.dumps({"query": "exam dates"}), name="search_documents")
+    events, model = await run_turn([search], [AIMessageChunk(content="Search is unavailable.")], turn=turn)
+    assert "Tool execution failed" in model.calls[1][-1].content
+    assert text(events) == "Search is unavailable."
+    [step] = steps(events)
+    assert step["tool"] == "search_documents" and "Tool execution failed" in step["outcome"]
+    payload = turn_log.call_args.kwargs["payload"]
+    assert (payload["status"], len(payload["steps"])) == ("answered", 1)

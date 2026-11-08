@@ -253,3 +253,39 @@ async def test_email_handler_keeps_its_behaviour_with_the_turn_context(harness):
     assert "No email was sent" in output
     delivery.assert_called_once_with("student@example.invalid", "Test", "Hello")
     assert audit.call_args.kwargs["event_type"] == "AI_EMAIL_SIMULATED"
+
+
+@pytest.mark.asyncio
+async def test_failing_tool_handler_is_audited_and_reported_generically(harness, ticket_tool, caplog):
+    audit, _ = harness
+    ticket_tool.side_effect = RuntimeError("connect to 10.0.0.5 failed")
+    turn = context()
+    output = await registry.execute_tool_call(
+        {"name": "lookup_ticket", "args": '{"ticket_id": 7}', "id": "c", "index": 0}, turn
+    )
+    assert "Tool execution failed" in output
+    assert "10.0.0.5" not in output
+    audit.assert_awaited_once()
+    event = audit.call_args.kwargs
+    assert (event["lab_instance_id"], event["event_type"], event["source_ip"]) == (
+        turn.lab_instance_id,
+        "AI_TOOL_FAILED",
+        "LLM_AGENT",
+    )
+    assert event["payload"] == {"tool": "lookup_ticket", "reason": "Tool execution failed"}
+    assert any("10.0.0.5" in str(record.exc_info) for record in caplog.records)  # details stay in the server log
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["search", "reranker"])
+async def test_document_search_failures_are_audited(harness, monkeypatch, failure):
+    audit, _ = harness
+    turn = context(use_reranker=True, documents=["context"])
+    if failure == "search":
+        turn.vector_store.search_documents.side_effect = RuntimeError("Chroma unavailable")
+    else:
+        monkeypatch.setattr(document_search_tool, "get_reranker", Mock(side_effect=OSError("model missing")))
+    output = await search(turn)
+    assert "Tool execution failed" in output
+    assert audit.call_args.kwargs["event_type"] == "AI_TOOL_FAILED"
+    assert audit.call_args.kwargs["payload"]["tool"] == "search_documents"
