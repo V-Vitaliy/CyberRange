@@ -106,10 +106,11 @@ export async function* streamChat(token: string, request: ChatRequest, signal?: 
   yield* readChatEvents(response.body);
 }
 
-export async function listThreads(token: string, sessionId: string): Promise<ChatThread[]> {
+export async function listThreads(token: string, sessionId: string, signal?: AbortSignal): Promise<ChatThread[]> {
   try {
     return await requestJson<ChatThread[]>(`${RED_API_BASE}/chat/threads?session_id=${encodeURIComponent(sessionId)}`, {
-      headers: { Authorization: `Bearer ${token}` }
+      headers: { Authorization: `Bearer ${token}` },
+      signal
     });
   } catch (err) {
     forgetRejectedToken(err, token);

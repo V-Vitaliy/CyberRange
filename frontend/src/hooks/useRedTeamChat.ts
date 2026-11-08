@@ -12,31 +12,30 @@ export function useRedTeamChat(token: string, sessionId: string, onUnauthorized:
   const [turn, setTurn] = useState<ChatTurn | null>(null);
   const [error, setError] = useState('');
   const pending = useRef<AbortController | null>(null);
+  const mounted = useRef<AbortController | null>(null);
 
   const handleError = useCallback((err: unknown) => {
     if (err instanceof ApiError && err.status === 401) onUnauthorized();
     setError(err instanceof Error ? err.message : CHAT_FAILED_MESSAGE);
   }, [onUnauthorized]);
 
-  const refreshThreads = useCallback(async () => {
-    try {
-      setThreads(await listThreads(token, sessionId));
-    } catch (err) {
-      handleError(err);
-    }
+  // Thread loads belong to one mount: once it ends, a late reply or 401 must not reach a newer login.
+  const loadThreads = useCallback((signal: AbortSignal) => {
+    listThreads(token, sessionId, signal).then(
+      list => { if (!signal.aborted) setThreads(list); },
+      err => { if (!signal.aborted) handleError(err); }
+    );
   }, [token, sessionId, handleError]);
 
   useEffect(() => {
-    let cancelled = false;
-    listThreads(token, sessionId).then(
-      list => { if (!cancelled) setThreads(list); },
-      err => { if (!cancelled) handleError(err); }
-    );
+    const controller = new AbortController();
+    mounted.current = controller;
+    loadThreads(controller.signal);
     return () => {
-      cancelled = true;
+      controller.abort();
       pending.current?.abort();
     };
-  }, [token, sessionId, handleError]);
+  }, [loadThreads]);
 
   const selectThread = (thread: ChatThread) => {
     if (turn) return;
@@ -73,7 +72,7 @@ export function useRedTeamChat(token: string, sessionId: string, onUnauthorized:
         const answer = current.answer;
         if (answer) setMessages(list => [...list, { role: 'ai', content: answer }]);
         setTurn(null);
-        void refreshThreads();
+        if (mounted.current) loadThreads(mounted.current.signal);
       }
       pending.current = null;
     }

@@ -145,6 +145,18 @@ test('thread list comes from the API for the session', async () => {
   assert.equal(sent.options.headers.Authorization, 'Bearer red-token');
 });
 
+test('thread list request is cancelled by its signal', async () => {
+  stored.set(RED_TOKEN_KEY, 'red-token');
+  globalThis.fetch = (url, options) => new Promise((resolve, reject) => {
+    options.signal.addEventListener('abort', () => reject(options.signal.reason));
+  });
+  const controller = new AbortController();
+  const request = listThreads('red-token', 'session-1', controller.signal);
+  controller.abort();
+  await assert.rejects(request, err => err.name === 'AbortError');
+  assert.equal(stored.get(RED_TOKEN_KEY), 'red-token');
+});
+
 test('new thread ids are distinct UUIDs generated on the client', () => {
   const first = newThreadId();
   assert.match(first, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
