@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { ApiError } from '@/api/client';
 import {
   CHAT_FAILED_MESSAGE, ChatMessage, ChatThread, ChatTurn,
-  applyChatEvent, emptyTurn, listThreads, newThreadId, streamChat
+  applyChatEvent, createThreadLoader, emptyTurn, newThreadId, streamChat
 } from '@/api/chat';
 
 export function useRedTeamChat(token: string, sessionId: string, onUnauthorized: () => void) {
@@ -12,30 +12,22 @@ export function useRedTeamChat(token: string, sessionId: string, onUnauthorized:
   const [turn, setTurn] = useState<ChatTurn | null>(null);
   const [error, setError] = useState('');
   const pending = useRef<AbortController | null>(null);
-  const mounted = useRef<AbortController | null>(null);
+  const loader = useRef<ReturnType<typeof createThreadLoader> | null>(null);
 
   const handleError = useCallback((err: unknown) => {
     if (err instanceof ApiError && err.status === 401) onUnauthorized();
     setError(err instanceof Error ? err.message : CHAT_FAILED_MESSAGE);
   }, [onUnauthorized]);
 
-  // Thread loads belong to one mount: once it ends, a late reply or 401 must not reach a newer login.
-  const loadThreads = useCallback((signal: AbortSignal) => {
-    listThreads(token, sessionId, signal).then(
-      list => { if (!signal.aborted) setThreads(list); },
-      err => { if (!signal.aborted) handleError(err); }
-    );
-  }, [token, sessionId, handleError]);
-
   useEffect(() => {
-    const controller = new AbortController();
-    mounted.current = controller;
-    loadThreads(controller.signal);
+    const threadLoader = createThreadLoader(token, sessionId, setThreads, handleError);
+    loader.current = threadLoader;
+    void threadLoader.load();
     return () => {
-      controller.abort();
+      threadLoader.cancel();
       pending.current?.abort();
     };
-  }, [loadThreads]);
+  }, [token, sessionId, handleError]);
 
   const selectThread = (thread: ChatThread) => {
     if (turn) return;
@@ -72,7 +64,7 @@ export function useRedTeamChat(token: string, sessionId: string, onUnauthorized:
         const answer = current.answer;
         if (answer) setMessages(list => [...list, { role: 'ai', content: answer }]);
         setTurn(null);
-        if (mounted.current) loadThreads(mounted.current.signal);
+        void loader.current?.load();
       }
       pending.current = null;
     }

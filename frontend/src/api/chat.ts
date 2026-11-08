@@ -118,6 +118,28 @@ export async function listThreads(token: string, sessionId: string, signal?: Abo
   }
 }
 
+// Only the newest load may report: an older reply or a reply after cancel() would show stale threads
+// or log out a newer login.
+export function createThreadLoader(
+  token: string, sessionId: string, onThreads: (threads: ChatThread[]) => void, onError: (err: unknown) => void
+) {
+  let current: AbortController | null = null;
+  return {
+    load(): Promise<void> {
+      current?.abort();
+      const controller = new AbortController();
+      current = controller;
+      return listThreads(token, sessionId, controller.signal).then(
+        threads => { if (!controller.signal.aborted) onThreads(threads); },
+        err => { if (!controller.signal.aborted) onError(err); }
+      );
+    },
+    cancel(): void {
+      current?.abort();
+    }
+  };
+}
+
 // crypto.randomUUID exists only in secure contexts; a lab may be served over plain HTTP.
 export function newThreadId(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(16));

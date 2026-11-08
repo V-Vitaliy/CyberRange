@@ -8,7 +8,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ApiError } from '../src/api/client.ts';
 import { RED_TOKEN_KEY } from '../src/api/red-team.ts';
-import { CHAT_FAILED_MESSAGE, applyChatEvent, emptyTurn, listThreads, newThreadId, readChatEvents, streamChat } from '../src/api/chat.ts';
+import { CHAT_FAILED_MESSAGE, applyChatEvent, createThreadLoader, emptyTurn, listThreads, newThreadId, readChatEvents, streamChat } from '../src/api/chat.ts';
 
 const originalFetch = globalThis.fetch;
 let stored;
@@ -155,6 +155,50 @@ test('thread list request is cancelled by its signal', async () => {
   controller.abort();
   await assert.rejects(request, err => err.name === 'AbortError');
   assert.equal(stored.get(RED_TOKEN_KEY), 'red-token');
+});
+
+// Replies are released by the test in any order; the signal is ignored like a reply already on the wire.
+function heldFetch() {
+  const replies = [];
+  globalThis.fetch = () => new Promise(resolve => replies.push(resolve));
+  return replies;
+}
+
+test('only the latest thread list is applied', async () => {
+  const replies = heldFetch();
+  const applied = [];
+  const loader = createThreadLoader('red-token', 'session-1', list => applied.push(list), assert.fail);
+  const first = loader.load();
+  const second = loader.load();
+  replies[1](Response.json([{ id: 'new', title: 'new', updated_at: null, messages: [] }]));
+  await second;
+  replies[0](Response.json([]));
+  await first;
+  assert.deepEqual(applied.map(list => list.map(t => t.id)), [['new']]);
+});
+
+test('a cancelled loader ignores a late 401', async () => {
+  stored.set(RED_TOKEN_KEY, 'newer-token');
+  const replies = heldFetch();
+  const errors = [];
+  const loader = createThreadLoader('red-token', 'session-1', assert.fail, err => errors.push(err));
+  const load = loader.load();
+  loader.cancel();
+  replies[0](Response.json({ detail: 'Invalid token; please re-login' }, { status: 401 }));
+  await load;
+  assert.deepEqual(errors, []);
+  assert.equal(stored.get(RED_TOKEN_KEY), 'newer-token');
+});
+
+test('a loader reports the error of its current load', async () => {
+  const replies = heldFetch();
+  const errors = [];
+  const loader = createThreadLoader('red-token', 'session-1', assert.fail, err => errors.push(err));
+  const load = loader.load();
+  replies[0](Response.json({ detail: 'Game session not found' }, { status: 404 }));
+  await load;
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].status, 404);
 });
 
 test('new thread ids are distinct UUIDs generated on the client', () => {
