@@ -1,6 +1,7 @@
 """Chat streaming and tool execution; real adapters with offline HTTP doubles."""
 
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
@@ -9,12 +10,20 @@ import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 
 from app.agents.tools import email_tool
+from app.agents.tools.base import ToolContext
+from app.agents.tools.document_search_tool import search_documents
 from app.agents.tools.email_tool import send_email
 from app.chat import llm_engine
 from app.core.queue_manager import LLMQueueManager
 from tests.openai_doubles import assert_request, make_model, sse
 
 LAB = str(uuid4())
+TURN = ToolContext(
+    lab_instance_id=LAB,
+    role="red_team",
+    use_reranker=False,
+    vector_store=SimpleNamespace(search_documents=Mock(return_value={"documents": [[]]})),
+)
 EMAIL = json.dumps(dict(to_address="student@example.invalid", subject="Test", body="Hello"))
 
 
@@ -30,14 +39,15 @@ class ScriptedModel:
             yield chunk
 
 
-async def run_turn(*turns, queue=None):
+async def run_turn(*turns, queue=None, turn=TURN):
     scripted = ScriptedModel(*turns)
     model = Mock()
     model.bind_tools.return_value = scripted
     events = [
-        event async for event in llm_engine.run_agent_turn(model, "system", "question", LAB, queue or LLMQueueManager())
+        event
+        async for event in llm_engine.run_agent_turn(model, "system", "question", turn, queue or LLMQueueManager())
     ]
-    model.bind_tools.assert_called_once_with([send_email])
+    model.bind_tools.assert_called_once_with([send_email, search_documents])
     return events, scripted
 
 
@@ -191,7 +201,7 @@ async def test_model_without_tools_retains_text_chat(harness):
     model = Mock()
     model.bind_tools.side_effect = NotImplementedError()
     model.astream = stream
-    events = [event async for event in llm_engine.run_agent_turn(model, "system", "question", LAB, LLMQueueManager())]
+    events = [event async for event in llm_engine.run_agent_turn(model, "system", "question", TURN, LLMQueueManager())]
     assert text(events) == "Local answer"
     harness[1].assert_not_called()
 
@@ -330,7 +340,35 @@ async def test_gpu_lock_is_held_only_while_the_model_runs(harness, turn_log):
     delivery.side_effect = lambda *args: seen.append(("tool", queue.gpu_lock.locked())) or True
     model = Mock()
     model.bind_tools.return_value = LockAwareModel([tool_chunk(EMAIL)], [AIMessageChunk(content="Done.")])
-    [_ async for _ in llm_engine.run_agent_turn(model, "system", "question", LAB, queue)]
+    [_ async for _ in llm_engine.run_agent_turn(model, "system", "question", TURN, queue)]
     # Between steps the model is free for the Auto-SOC and other chats.
     assert seen == [("model", True), ("tool", False), ("model", True)]
     assert not queue.gpu_lock.locked()
+
+
+@pytest.mark.asyncio
+async def test_document_search_result_goes_back_to_the_model(harness, turn_log):
+    store = SimpleNamespace(search_documents=Mock(return_value={"documents": [["Exams start on Monday."]]}))
+    turn = ToolContext(lab_instance_id=LAB, role="red_team", use_reranker=False, vector_store=store)
+    search = tool_chunk(json.dumps({"query": "exam dates"}), name="search_documents")
+    events, model = await run_turn([search], [AIMessageChunk(content="On Monday.")], turn=turn)
+    lab_filter = {"lab_instance_id": LAB}
+    assert store.search_documents.call_args.kwargs["where"] == {"$and": [lab_filter, {"access_level": "public"}]}
+    result = model.calls[1][-1]
+    assert isinstance(result, ToolMessage) and "Exams start on Monday." in result.content
+    assert text(events) == "On Monday."
+    assert [step["tool"] for step in steps(events)] == ["search_documents"]
+
+
+@pytest.mark.asyncio
+async def test_tool_failure_on_the_first_step_is_part_of_the_turn(harness, turn_log):
+    store = SimpleNamespace(search_documents=Mock(side_effect=RuntimeError("Chroma unavailable")))
+    turn = ToolContext(lab_instance_id=LAB, role="red_team", use_reranker=False, vector_store=store)
+    search = tool_chunk(json.dumps({"query": "exam dates"}), name="search_documents")
+    events, model = await run_turn([search], [AIMessageChunk(content="Search is unavailable.")], turn=turn)
+    assert "Tool execution failed" in model.calls[1][-1].content
+    assert text(events) == "Search is unavailable."
+    [step] = steps(events)
+    assert step["tool"] == "search_documents" and "Tool execution failed" in step["outcome"]
+    payload = turn_log.call_args.kwargs["payload"]
+    assert (payload["status"], len(payload["steps"])) == ("answered", 1)

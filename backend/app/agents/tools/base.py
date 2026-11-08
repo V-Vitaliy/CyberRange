@@ -5,6 +5,18 @@ from typing import Any, Literal
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel
 
+from app.documents.chroma_client import VectorStore
+
+
+@dataclass(frozen=True)
+class ToolContext:
+    """What a tool call may use from the chat turn that made it."""
+
+    lab_instance_id: str
+    role: str
+    use_reranker: bool
+    vector_store: VectorStore
+
 
 @dataclass(frozen=True)
 class ToolResult:
@@ -21,4 +33,4 @@ class AgentTool:
 
     schema: BaseTool
     risk: Literal["low", "medium", "high"]
-    handler: Callable[[BaseModel], Awaitable[ToolResult]]
+    handler: Callable[[BaseModel, ToolContext], Awaitable[ToolResult]]

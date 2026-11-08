@@ -1,5 +1,4 @@
 import json
-import threading
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
@@ -7,6 +6,7 @@ from uuid import uuid4
 import pytest
 from langchain_core.messages import AIMessageChunk
 
+from app.agents.tools.base import ToolContext
 from app.chat import service as rag_service
 from app.chat import sqli_search
 from app.chat.prompt_builder import PromptBuilder
@@ -29,14 +29,16 @@ def no_exercise_secret(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("role", ["red_team", "admin"])
-async def test_rag_limits_both_roles_to_their_lab(monkeypatch, role):
+async def test_chat_passes_the_turn_context_without_searching_in_advance(monkeypatch, role):
     lab_id = uuid4()
     session = GameSession(lab_instance_id=lab_id, use_reranker=False, system_prompt="test")
     monkeypatch.setattr(rag_service, "get_authorized_session", AsyncMock(return_value=session))
     monkeypatch.setattr(ChatRepository, "get_or_create_thread", AsyncMock())
     monkeypatch.setattr(ChatRepository, "append_messages", AsyncMock())
+    captured = {}
 
     async def stream(**kwargs):
+        captured.update(kwargs)
         yield {"text": "test response"}
 
     monkeypatch.setattr(rag_service, "run_agent_turn", stream)
@@ -48,29 +50,23 @@ async def test_rag_limits_both_roles_to_their_lab(monkeypatch, role):
             request_db(), uuid4(), uuid4(), "question", LLMQueueManager(), store, user, object()
         )
     ]
-    where = store.search_documents.call_args.kwargs["where"]
-    lab_filter = {"lab_instance_id": str(lab_id)}
-    assert where == (lab_filter if role == "admin" else {"$and": [lab_filter, {"access_level": "public"}]})
     assert result[-1] == "data: [DONE]\n\n"
+    # Documents are searched only when the model calls the tool.
+    store.search_documents.assert_not_called()
+    assert captured["context"] == ToolContext(
+        lab_instance_id=str(lab_id), role=role, use_reranker=False, vector_store=store
+    )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("enabled", [False, True])
-async def test_reranker_switch_and_system_prompt_reach_generation(monkeypatch, enabled):
+async def test_reranker_flag_and_system_prompt_reach_the_agent_turn(monkeypatch, enabled):
     session = SimpleNamespace(
         lab_instance_id=uuid4(), use_reranker=enabled, system_prompt="Purchased custom instruction"
     )
     monkeypatch.setattr(rag_service, "get_authorized_session", AsyncMock(return_value=session))
     monkeypatch.setattr(ChatRepository, "get_or_create_thread", AsyncMock())
     monkeypatch.setattr(ChatRepository, "append_messages", AsyncMock())
-    reranker = Mock()
-    reranker.predict.return_value = [-1, 2]
-    monkeypatch.setattr(rag_service, "get_reranker", Mock(return_value=reranker))
-
-    async def in_thread(function, *args, **kwargs):
-        return function(*args, **kwargs)
-
-    monkeypatch.setattr(rag_service.asyncio, "to_thread", in_thread)
     captured = {}
 
     async def stream(**kwargs):
@@ -78,9 +74,7 @@ async def test_reranker_switch_and_system_prompt_reach_generation(monkeypatch, e
         yield {"text": "answer"}
 
     monkeypatch.setattr(rag_service, "run_agent_turn", stream)
-    store = SimpleNamespace(
-        search_documents=Mock(return_value={"documents": [["discarded context", "retained context"]]})
-    )
+    store = SimpleNamespace(search_documents=Mock(return_value={"documents": [["context"]]}))
     user = dict(id=str(uuid4()), sub="student", role="red_team", lab_instance_id=str(session.lab_instance_id))
     parts = [
         part
@@ -90,9 +84,9 @@ async def test_reranker_switch_and_system_prompt_reach_generation(monkeypatch, e
     ]
     assert parts[-1] == "data: [DONE]\n\n"
     assert "Purchased custom instruction" in captured["system_prompt"]
-    assert "retained context" in captured["human_prompt"]
-    assert ("discarded context" in captured["human_prompt"]) is not enabled
-    assert reranker.predict.called is enabled
+    assert "question" in captured["human_prompt"]
+    assert captured["context"].use_reranker is enabled
+    store.search_documents.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -218,72 +212,6 @@ async def test_chat_failure_hides_internal_details_from_client(monkeypatch, capl
 
 
 @pytest.mark.asyncio
-async def test_document_search_runs_off_the_event_loop(monkeypatch):
-    session = SimpleNamespace(lab_instance_id=uuid4(), use_reranker=False, system_prompt="test")
-    monkeypatch.setattr(rag_service, "get_authorized_session", AsyncMock(return_value=session))
-    monkeypatch.setattr(ChatRepository, "get_or_create_thread", AsyncMock())
-    monkeypatch.setattr(ChatRepository, "append_messages", AsyncMock())
-
-    async def stream(**kwargs):
-        yield {"text": "answer"}
-
-    monkeypatch.setattr(rag_service, "run_agent_turn", stream)
-    threads = []
-
-    def search(*args, **kwargs):
-        threads.append(threading.get_ident())
-        assert not threading.current_thread().name.startswith("etl")
-        return {"documents": [[]]}
-
-    store = SimpleNamespace(search_documents=Mock(side_effect=search))
-    user = dict(id=str(uuid4()), sub="student", role="admin", lab_instance_id=str(session.lab_instance_id))
-    parts = [
-        part
-        async for part in rag_service.generate_chat_response_sse(
-            request_db(), uuid4(), uuid4(), "question", LLMQueueManager(), store, user, object()
-        )
-    ]
-    assert parts[-1] == "data: [DONE]\n\n"
-    assert threads and threads[0] != threading.get_ident()
-    assert store.search_documents.call_args.kwargs["where"] == {"lab_instance_id": str(session.lab_instance_id)}
-
-
-@pytest.mark.asyncio
-async def test_reranker_loading_and_scoring_run_off_the_event_loop(monkeypatch):
-    session = SimpleNamespace(lab_instance_id=uuid4(), use_reranker=True, system_prompt="test")
-    monkeypatch.setattr(rag_service, "get_authorized_session", AsyncMock(return_value=session))
-    monkeypatch.setattr(ChatRepository, "get_or_create_thread", AsyncMock())
-    monkeypatch.setattr(ChatRepository, "append_messages", AsyncMock())
-
-    async def stream(**kwargs):
-        yield {"text": "answer"}
-
-    monkeypatch.setattr(rag_service, "run_agent_turn", stream)
-    threads = {}
-
-    def predict(pairs):
-        threads["predict"] = threading.get_ident()
-        return [1.0 for _ in pairs]
-
-    def load():
-        threads["load"] = threading.get_ident()
-        return SimpleNamespace(predict=predict)
-
-    monkeypatch.setattr(rag_service, "get_reranker", load)
-    store = SimpleNamespace(search_documents=Mock(return_value={"documents": [["context"]]}))
-    user = dict(id=str(uuid4()), sub="student", role="admin", lab_instance_id=str(session.lab_instance_id))
-    parts = [
-        part
-        async for part in rag_service.generate_chat_response_sse(
-            request_db(), uuid4(), uuid4(), "question", LLMQueueManager(), store, user, object()
-        )
-    ]
-    assert parts[-1] == "data: [DONE]\n\n"
-    assert threading.get_ident() not in (threads.get("load"), threads.get("predict"))
-    assert set(threads) == {"load", "predict"}
-
-
-@pytest.mark.asyncio
 async def test_history_search_goes_to_the_isolated_lab_reader(monkeypatch):
     found = ([{"title": "t"}], "SELECT ...")
     search = AsyncMock(return_value=found)
@@ -334,8 +262,18 @@ async def test_ex03_secret_reaches_the_model_even_after_prompt_patch(monkeypatch
 def test_confidential_note_follows_any_system_instruction():
     note = "flag{" + "b" * 32 + "}"
     for instruction in (None, "Custom instruction"):
-        system, human = PromptBuilder.build_prompts("q", [], system_instruction=instruction, confidential_note=note)
+        system, human = PromptBuilder.build_prompts("q", system_instruction=instruction, confidential_note=note)
         assert note in system and note not in human
         if instruction:
             assert system.index(instruction) < system.index(note)
-    assert "confidential" not in PromptBuilder.build_prompts("q", [])[0].lower()
+    assert "confidential" not in PromptBuilder.build_prompts("q")[0].lower()
+
+
+def test_prompt_tells_the_model_to_search_documents_with_the_tool():
+    for instruction in (None, "Custom instruction"):
+        system, human = PromptBuilder.build_prompts(
+            "When are exams?", username="student", system_instruction=instruction
+        )
+        assert "search_documents" in system  # also after Prompt Patch replaces the instruction
+        assert "CONTEXT" not in system + human
+        assert "When are exams?" in human and "student" in human

@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator
 
 from langchain_core.messages import AIMessageChunk, HumanMessage, SystemMessage, ToolMessage, message_chunk_to_message
 
+from app.agents.tools.base import ToolContext
 from app.agents.tools.registry import execute_tool_call, tool_schemas
 from app.core.queue_manager import LLMQueueManager
 from app.siem.service import log_security_event
@@ -41,7 +42,7 @@ async def run_agent_turn(
     llm_instance,
     system_prompt: str,
     human_prompt: str,
-    lab_instance_id: str,
+    context: ToolContext,
     queue: LLMQueueManager,
 ):
     """Run one chat turn: the model calls tools and sees their results until it answers in text.
@@ -72,7 +73,7 @@ async def run_agent_turn(
 
             messages.append(message_chunk_to_message(response))
             for call in response.tool_call_chunks:
-                outcome = await execute_tool_call(call, lab_instance_id)
+                outcome = await execute_tool_call(call, context)
                 messages.append(ToolMessage(content=outcome, tool_call_id=call.get("id") or ""))
                 record = {
                     "step": step,
@@ -91,7 +92,7 @@ async def run_agent_turn(
     finally:
         if steps or status == "step_limit":
             await log_security_event(
-                lab_instance_id=lab_instance_id,
+                lab_instance_id=context.lab_instance_id,
                 event_type="AGENT_TURN",
                 payload={"status": status, "steps": steps},
                 source_ip="LLM_AGENT",
