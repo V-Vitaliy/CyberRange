@@ -29,6 +29,7 @@ ROUTE_OWNERS = {
     "/logs": "siem",
     "/chat/ask": "chat",
     "/chat/history": "chat",
+    "/chat/threads": "chat",
     "/upload": "documents",
     "/ws/etl-status/{task_id}": "documents",
 }

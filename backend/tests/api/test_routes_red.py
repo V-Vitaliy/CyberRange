@@ -1,5 +1,6 @@
 """Red Team routes with mocked storage; not evidence of PostgreSQL isolation."""
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
@@ -412,3 +413,76 @@ async def test_forged_role_still_gets_only_its_own_labs_session(client, red_prof
     response = await client.get("/api/red/me", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 200
     assert response.json()["session_id"] == str(red_profile.own.id)
+
+
+@pytest.fixture
+def threads(monkeypatch):
+    """A student in their lab's session; thread storage is a spy."""
+    lab, session = uuid4(), uuid4()
+    user = _authenticated_user(lab)
+    db = object()
+
+    async def current_user():
+        return user
+
+    async def database():
+        yield db
+
+    prior = dict(red_app.dependency_overrides)
+    red_app.dependency_overrides.update({get_db: database, get_current_user_vulnerable: current_user})
+    sessions = AsyncMock(return_value=SimpleNamespace(lab_instance_id=lab))
+    monkeypatch.setattr(GameSessionRepository, "get_by_id", sessions)
+    thread = SimpleNamespace(
+        id=uuid4(),
+        title="hello",
+        updated_at=datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc),
+        messages=[{"role": "user", "content": "hello"}, {"role": "ai", "content": "<b>hi</b>"}],
+    )
+    listing = AsyncMock(return_value=[thread])
+    monkeypatch.setattr(ChatRepository, "get_threads_by_user_and_session", listing)
+    try:
+        yield SimpleNamespace(user=user, session=session, sessions=sessions, listing=listing, thread=thread, db=db)
+    finally:
+        red_app.dependency_overrides.clear()
+        red_app.dependency_overrides.update(prior)
+
+
+@pytest.mark.asyncio
+async def test_threads_lists_only_the_students_own_threads_in_the_session(client, threads):
+    response = await client.get("/api/red/chat/threads", params={"session_id": str(threads.session)})
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "id": str(threads.thread.id),
+            "title": "hello",
+            "updated_at": "2026-11-08T12:00:00Z",
+            "messages": [{"role": "user", "content": "hello"}, {"role": "ai", "content": "<b>hi</b>"}],
+        }
+    ]
+    threads.listing.assert_awaited_once()
+    _db, user_id, session_id = threads.listing.await_args.args
+    assert (str(user_id), str(session_id)) == (threads.user["id"], str(threads.session))
+
+
+@pytest.mark.asyncio
+async def test_threads_reject_another_labs_session_before_listing(client, threads):
+    threads.sessions.return_value = SimpleNamespace(lab_instance_id=uuid4())
+    response = await client.get("/api/red/chat/threads", params={"session_id": str(threads.session)})
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Game session not found"
+    threads.listing.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_threads_require_authentication(client):
+    async def database():
+        yield object()
+
+    prior = dict(red_app.dependency_overrides)
+    red_app.dependency_overrides[get_db] = database
+    try:
+        response = await client.get("/api/red/chat/threads", params={"session_id": str(uuid4())})
+    finally:
+        red_app.dependency_overrides.clear()
+        red_app.dependency_overrides.update(prior)
+    assert response.status_code == 401

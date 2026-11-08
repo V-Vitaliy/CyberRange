@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.chat.llm_engine import run_agent_turn
 from app.chat.prompt_builder import PromptBuilder
 from app.chat.repository import ChatRepository
+from app.chat.schemas import ChatThreadResponse
 from app.core.queue_manager import LLMQueueManager
 from app.documents.chroma_client import VectorStore
 from app.labs.service import get_authorized_session, get_exercise_secret
@@ -30,6 +31,14 @@ async def add_seeded_thread(db: AsyncSession, user_id, session_id, title: str, m
     return await ChatRepository.add_thread(
         db, id=uuid4(), user_id=user_id, session_id=session_id, title=title, messages=messages
     )
+
+
+async def list_threads(db: AsyncSession, user_id, session_id) -> list[ChatThreadResponse]:
+    """The student's own threads in a session, newest first, for the chat sidebar."""
+    threads = await ChatRepository.get_threads_by_user_and_session(db, user_id, session_id)
+    return [
+        ChatThreadResponse(id=t.id, title=t.title, updated_at=t.updated_at, messages=t.messages or []) for t in threads
+    ]
 
 
 async def search_chat_history(lab_id, session_id, query):

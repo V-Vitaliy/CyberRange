@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.service import get_current_user_vulnerable
 from app.chat import service
-from app.chat.schemas import ChatRequest
+from app.chat.schemas import ChatRequest, ChatThreadResponse
 from app.chat.sqli_isolation import IsolationError
 from app.chat.sqli_search import HistoryQueryError
 from app.core.queue_manager import LLMQueueManager, get_queue_manager
@@ -93,3 +93,13 @@ async def search_chat_history(
             source_ip=request.client.host,
         )
         raise HTTPException(status_code=503 if isinstance(e, IsolationError) else 400, detail=str(e))
+
+
+@router.get("/chat/threads", response_model=list[ChatThreadResponse], tags=["Red Team"])
+async def list_chat_threads(
+    session_id: str = Query(..., description="Session ID"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user_vulnerable),
+):
+    await get_authorized_session(db, session_id, user["lab_instance_id"])
+    return await service.list_threads(db, user["id"], session_id)
