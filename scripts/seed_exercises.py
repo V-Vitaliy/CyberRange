@@ -21,7 +21,7 @@ async def run(lab_id: UUID) -> dict:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from app.core.redis_client import redis_client
-    from app.db.database import Base, engine
+    from app.db.database import create_schema, engine
     from app.documents.chroma_client import VectorStore
     from app.documents.service import ETLWorker
     from app.labs.exercises import PrivatePdfIndex, index_private_document, seed_exercise_flags
@@ -34,8 +34,8 @@ async def run(lab_id: UUID) -> dict:
             await lock.execute(text("SELECT pg_advisory_lock(721034, 2)"))
             try:
                 async with engine.begin() as connection:
-                    # Creates lab_secrets on databases provisioned before LAB-6; existing tables are untouched.
-                    await connection.run_sync(Base.metadata.create_all)
+                    # Creates lab_secrets on databases provisioned before LAB-6 and applies column upgrades.
+                    await create_schema(connection)
                     async with AsyncSession(bind=connection, expire_on_commit=False) as db:
                         created = await seed_exercise_flags(db, lab_id)
                 # Index only committed flags: the vector store never holds a flag the database does not know.

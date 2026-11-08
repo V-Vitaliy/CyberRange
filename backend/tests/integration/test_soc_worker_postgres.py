@@ -20,6 +20,13 @@ TEST_NAME = os.environ.get("CYBERRANGE_SOC_TEST_DATABASE_NAME")
 
 @unittest.skipUnless(TEST_URL and TEST_NAME, "Explicit SOC test PostgreSQL required")
 class PostgresSocWorkerTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncTearDown(self):
+        # Pooled connections belong to this test's event loop; the next test runs in a new one.
+        from app.db.database import engine, siem_engine
+
+        await engine.dispose()
+        await siem_engine.dispose()
+
     async def test_no_transaction_or_row_lock_is_held_during_analysis(self):
         os.environ["DATABASE_URL"] = TEST_URL
         os.environ["JWT_SECRET"] = secrets.token_urlsafe(48)
@@ -129,7 +136,7 @@ class PostgresSocWorkerTests(unittest.IsolatedAsyncioTestCase):
             await conn.run_sync(Base.metadata.create_all)
         await observer.dispose()
         solo, team = uuid4(), uuid4()
-        burst, single, prompt, team_event = (uuid4() for _ in range(4))
+        burst, single, uncounted, prompt, team_event = (uuid4() for _ in range(5))
         async with soc_worker.async_session() as db:
             db.add(GameSession(id=uuid4(), team_id=uuid4(), lab_instance_id=solo, is_solo=True))
             db.add(GameSession(id=uuid4(), team_id=uuid4(), lab_instance_id=team, is_solo=False))
@@ -138,6 +145,8 @@ class PostgresSocWorkerTests(unittest.IsolatedAsyncioTestCase):
                 (single, solo, "LOGIN_FAILED", {"username": "b", "failed_usernames_from_source": 1}),
                 (prompt, solo, "LLM_PROMPT", {"prompt": "hi"}),
                 (team_event, team, "LOGIN_FAILED", {"username": "c", "failed_usernames_from_source": 6}),
+                # Counting failed when this was logged: the rule cannot judge it.
+                (uncounted, solo, "LOGIN_FAILED", {"username": "d", "failed_usernames_from_source": None}),
             ):
                 db.add(SecurityAuditLog(id=log_id, lab_instance_id=lab, event_type=event_type, payload=payload))
             await db.commit()
@@ -151,7 +160,9 @@ class PostgresSocWorkerTests(unittest.IsolatedAsyncioTestCase):
         async def rows():
             async with soc_worker.async_session() as db:
                 result = await db.execute(
-                    select(SecurityAuditLog).where(SecurityAuditLog.id.in_([burst, single, prompt, team_event]))
+                    select(SecurityAuditLog).where(
+                        SecurityAuditLog.id.in_([burst, single, uncounted, prompt, team_event])
+                    )
                 )
                 return {row.id: row for row in result.scalars().all()}
 
@@ -177,6 +188,8 @@ class PostgresSocWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(current[burst].payload["soc_reasoning"].startswith("Rule-based verdict"))
         # Team labs keep their events for the Blue Team to investigate.
         self.assertIsNone(current[team_event].investigated_at)
+        # Without a count the event stays pending instead of being closed as benign.
+        self.assertIsNone(current[uncounted].investigated_at)
         await app_engine.dispose()
 
     async def test_concurrent_failed_logins_from_one_source_count_each_other(self):
@@ -208,7 +221,7 @@ class PostgresSocWorkerTests(unittest.IsolatedAsyncioTestCase):
                 for name in names
             )
         )
-        async with siem.async_session() as db:
+        async with siem.siem_session() as db:
             rows = (
                 (
                     await db.execute(
@@ -223,6 +236,37 @@ class PostgresSocWorkerTests(unittest.IsolatedAsyncioTestCase):
         counts = sorted(row.payload["failed_usernames_from_source"] for row in rows)
         self.assertEqual(counts, list(range(1, len(names) + 1)))
         await app_engine.dispose()
+
+    async def test_events_are_written_while_the_request_pool_is_exhausted(self):
+        """Every request-pool connection is held, as by requests that log events: writes must not wait."""
+        os.environ["DATABASE_URL"] = TEST_URL
+        os.environ.setdefault("JWT_SECRET", secrets.token_urlsafe(48))
+        sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "backend"))
+        from sqlalchemy import select, text
+
+        from app.db import database
+        from app.db.models import SecurityAuditLog
+        from app.siem import service as siem
+
+        async with database.engine.begin() as conn:
+            self.assertEqual(await conn.scalar(text("SELECT current_database()")), TEST_NAME)
+            await conn.run_sync(database.Base.metadata.create_all)
+        pool = database.engine.pool
+        held = []
+        lab = str(uuid4())
+        try:
+            for _ in range(pool.size() + pool._max_overflow):
+                conn = await database.engine.connect()
+                await conn.execute(text("SELECT 1"))
+                held.append(conn)
+            event = await asyncio.wait_for(siem.log_security_event(lab, "POOL_CHECK", {"k": "v"}), timeout=5)
+            self.assertIsNotNone(event)
+        finally:
+            for conn in held:
+                await conn.close()
+        async with siem.siem_session() as db:
+            stored = await db.scalar(select(SecurityAuditLog.event_type).where(SecurityAuditLog.lab_instance_id == lab))
+        self.assertEqual(stored, "POOL_CHECK")
 
 
 if __name__ == "__main__":

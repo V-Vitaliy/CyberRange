@@ -136,6 +136,17 @@ def test_routes_are_declared_in_their_domain_router(route):
     assert [f"{path}:{line}" for path, line in found if path != owner] == []
 
 
+SCRIPTS = APP.parents[1] / "scripts"
+
+
+@pytest.mark.parametrize("script", sorted(SCRIPTS.glob("*.py")), ids=lambda path: path.name)
+def test_scripts_that_create_tables_also_apply_schema_upgrades(script):
+    """create_all leaves existing tables as they are; columns added later come from SCHEMA_UPGRADES."""
+    names = _names(ast.parse(script.read_text(), filename=str(script)))
+    if "create_all" in names:
+        assert "SCHEMA_UPGRADES" in names, f"{script.name} creates tables without the column upgrades"
+
+
 @pytest.mark.parametrize("legacy", ["api", "services", "schemas", "db/repository.py"])
 def test_pre_domain_layers_are_gone(legacy):
     assert not (APP / legacy).exists(), f"{legacy} should have been split into domain packages"

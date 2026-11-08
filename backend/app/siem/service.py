@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.redis_client import redis_client
-from app.db.database import async_session
+from app.db.database import siem_session
 from app.db.models import GameSession, SecurityAuditLog
 from app.siem.repository import AuditLogRepository
 from app.siem.schemas import DashboardStatsResponse
@@ -30,7 +30,7 @@ async def log_security_event(
     so the Blue Team can monitor and investigate them.
     The event is written in its own session: it never commits or rolls back the caller's transaction.
     """
-    async with async_session() as db:
+    async with siem_session() as db:
         return await _write_event(db, lab_instance_id, event_type, payload, source_ip)
 
 
@@ -97,7 +97,7 @@ async def log_failed_login(*, lab_instance_id: str, username: str, source_ip: st
     whether the username exists.
     """
     since = datetime.now(timezone.utc) - LOGIN_ENUMERATION_WINDOW
-    async with async_session() as db:
+    async with siem_session() as db:
         try:
             # Counting and writing share one transaction locked per lab and source, so concurrent
             # failures from one source wait for each other and every count includes the earlier ones.

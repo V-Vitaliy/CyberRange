@@ -373,6 +373,9 @@ class PostgresIsolationTests(unittest.IsolatedAsyncioTestCase):
                 await engine.dispose()
             await admin.dispose()
             await app_engine.dispose()
+            from app.db.database import siem_engine
+
+            await siem_engine.dispose()
 
 
 if __name__ == "__main__":

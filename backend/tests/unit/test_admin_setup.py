@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 
+from app.db import database
 from scripts import admin_setup as setup
 
 
@@ -110,15 +111,14 @@ class SeedTests(unittest.IsolatedAsyncioTestCase):
             options or self.options,
             self.passwords,
             self.hasher,
+            database.SCHEMA_UPGRADES,
         )
 
-    async def test_seed_adds_the_login_hardening_column_to_existing_labs(self):
+    async def test_seed_applies_every_schema_upgrade_to_existing_labs(self):
         # create_all does not alter tables that already exist.
         await self.run_seed()
-        self.assertIn(
-            "ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS login_hardening_enabled BOOLEAN NOT NULL DEFAULT FALSE",
-            self.engine.commands,
-        )
+        for statement in database.SCHEMA_UPGRADES:
+            self.assertIn(statement, self.engine.commands)
 
     async def test_clean_seed_has_explicit_ids_roles_and_hashed_passwords(self):
         report = await self.run_seed()
